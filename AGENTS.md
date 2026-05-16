@@ -16,22 +16,44 @@
 - Debug build: `swift build`
 - Release build: `swift build -c release`
 - Release binary: `.build/release/1132 Fixer`
+ 
+## Quick Summary
+- **Versioning:** Update `VERSION` for code changes; avoid duplicate bumps.
+- **Compatibility:** Target Swift 5.9 and macOS 13; use SwiftUI for UI work.
+- **Validation:** Run `swift build` and `swift run` as appropriate before committing.
 
-## Code Guidelines
-- Update `VERSION` when making any code changes, even minor ones, to reflect the new version. Don't bump  the version if the current version havet been committed yet, but do update it before the first commit.
+## Versioning Rules
+- When making code changes, ensure `VERSION` reflects the new version before committing.
+- If `VERSION` already contains an uncommitted bump for the current change set, do not bump it again.
+- Documentation-only changes do not require a `VERSION` update unless explicitly requested by the project maintainer (for example via PR comment or issue).
+
+Versioning Checks:
+
+- **Pre-commit check:** Before committing, verify `VERSION` exists and matches the project's semantic versioning format (e.g., `MAJOR.MINOR.PATCH`).
+- **Missing or invalid `VERSION`:** If `VERSION` is missing or its format appears invalid, stop and prompt the author to correct it before committing. Include the expected format and a sample value in the prompt.
+
+## Compatibility Requirements
 - Keep code compatible with Swift 5.9 and macOS 13 APIs.
-- Prefer small, focused changes over broad refactors.
-- Preserve existing behavior unless the task explicitly requests behavior changes.
 - Keep UI changes in SwiftUI and follow existing visual/component patterns.
+
+## Code Review Guidelines
+- Prefer small, focused changes over broad refactors.
+- Preserve existing behavior unless the task explicitly specifies which behavior to change and how.
 
 ## Safety Notes
 - The app executes shell commands that can require admin privileges (`osascript` + `sudo`) and launch Zoom with `sandbox-exec`.
-- Treat command/script edits as high impact; verify quoting and escaping carefully.
+- Treat command/script edits as critical; verify quoting and escaping to prevent syntax errors or security vulnerabilities.
 - Do not weaken or remove guardrails in scripts unless explicitly requested.
 
 ## Validation
-- After edits, run at least: `swift build`
-- If UI or runtime behavior changed, also run: `swift run` and verify no immediate startup errors.
+ - After edits, run at least: `swift build`.
+ - If UI or runtime behavior changed, also run: `swift run` and verify no immediate startup errors.
+ - If `swift build` or `swift run` fails, analyze the error message, fix syntax or dependency issues, and retry the relevant command.
+
+Escalation guidance:
+
+ - **If issues persist after troubleshooting:** Collect build and runtime logs, the exact commands you ran, and the changes you made, then open an issue or contact the project maintainer with that information.
+ - **Troubleshooting help:** When opening an issue, include `swift build`/`swift run` output, Xcode/Swift toolchain versions, and steps you already attempted to resolve the problem.
 
 ## Agent Workflow
 - Read this file before making changes.
