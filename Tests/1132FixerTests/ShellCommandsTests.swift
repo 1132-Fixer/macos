@@ -225,6 +225,12 @@ struct ShellCommandsTests {
         #expect(ShellCommands.zoomSandboxProfile.contains("(allow device-microphone)"))
         #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.cmio.VDCAssistant""#))
         #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.tccd""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.tccd.system""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.applecamerad""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.appleh13camerad""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.appleh16camerad""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.cmio.registerassistantservice.system-extensions""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.videoconference.camera""#))
     }
 
     @Test func makeLaunchZoomCommandUsesPersistentSandboxOnly() {
