@@ -127,7 +127,6 @@ final class AppViewModel: ObservableObject {
     private var runningTask: Task<Void, Never>?
     private var currentProcess: Process?
     private let stopZoomCommand = ShellCommands.stopZoom
-    private let resetZoomDataCommand = ShellCommands.resetZoomData
     private let stopZoomUpdatersCommand = ShellCommands.stopZoomUpdaters
     private let refreshDNSAppleScript = ShellCommands.refreshDNSAppleScript
     private let zoomBinaryPath = ShellCommands.zoomBinaryPath
@@ -204,10 +203,12 @@ final class AppViewModel: ObservableObject {
             self.markStepRunning("resetData")
             self.appendLog("Step: Reset Zoom data")
             do {
+                let resetCommand = ShellCommands.makeResetZoomDataCommand(homeDirectory: NSHomeDirectory())
+                let resetScript = ShellCommands.appleScriptDoShellScript(resetCommand, administratorPrivileges: true)
                 let output = try await self.runProcess(
                     stepName: "Reset Zoom data",
-                    executable: Constants.bashPath,
-                    arguments: ["-c", self.resetZoomDataCommand]
+                    executable: Constants.osascriptPath,
+                    arguments: ["-e", resetScript]
                 )
                 self.markStepDone("resetData", succeeded: true)
                 results.append(.init(id: "resetData", name: "Clear Local State", succeeded: true, detail: output.isEmpty ? nil : output))
@@ -683,11 +684,12 @@ If your network connection is disrupted after this step:
     private func resetPrivateWiFiAddressAndReconnect(networkService: String, device: String) async throws -> MACSpoofResult {
         // 1. Check current private address mode
         let getModeCmd = ShellCommands.makeGetPrivateAddressModeCommand(networkService: networkService)
-        let currentMode = (try? await runProcess(
+        let currentModeOutput = (try? await runProcess(
             stepName: "Check Private Wi-Fi Address mode",
             executable: Constants.bashPath,
             arguments: ["-c", getModeCmd]
-        ))?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? "unsupported"
+        )) ?? "unsupported"
+        let currentMode = ShellCommands.normalizePrivateAddressModeOutput(currentModeOutput)
 
         appendLog("Private Wi-Fi Address mode: \(currentMode)")
 
@@ -699,7 +701,7 @@ If your network connection is disrupted after this step:
             warnings.append("Warning: Private Wi-Fi Address controls are unsupported on this macOS/networksetup version.")
         } else if currentMode != "rotating" {
             let setModeCmd = ShellCommands.makeSetPrivateAddressModeCommand(networkService: networkService, mode: "rotating")
-            let setModeScript = ShellCommands.appleScriptDoShellScript(setModeCmd, administratorPrivileges: false)
+            let setModeScript = ShellCommands.appleScriptDoShellScript(setModeCmd, administratorPrivileges: true)
             do {
                 _ = try await runProcess(
                     stepName: "Enable rotating Private Wi-Fi Address",
@@ -718,7 +720,7 @@ If your network connection is disrupted after this step:
 
         // 3. Cycle the interface to generate a new MAC — always brings it back up
         let resetCmd = ShellCommands.makeRotatingMACResetCommand(device: device)
-        let resetScript = ShellCommands.appleScriptDoShellScript(resetCmd, administratorPrivileges: false)
+        let resetScript = ShellCommands.appleScriptDoShellScript(resetCmd, administratorPrivileges: true)
         do {
             _ = try await runProcess(
                 stepName: "Reset Wi-Fi to generate new rotating MAC",

@@ -36,8 +36,6 @@ enum ShellCommands {
     fi
     """#
 
-    static let resetZoomData = #"rm -rf "$HOME/Library/Application Support/zoom.us" "$HOME/Library/Caches/us.zoom.xos" "$HOME/Library/Preferences/us.zoom.xos.plist" "$HOME/Library/Logs/zoom.us.log"* "$HOME/Library/Saved Application State/us.zoom.xos.savedState"; defaults delete us.zoom.xos 2>/dev/null || true"#
-
     static let stopZoomUpdaters = #"""
     for proc in zAutoUpdate zPTUpdaterUI ZoomUpdater; do
       /usr/bin/pkill -x "$proc" 2>/dev/null || true
@@ -53,6 +51,37 @@ enum ShellCommands {
     """#
 
     static let refreshDNSAppleScript = #"do shell script "/usr/bin/dscacheutil -flushcache; /usr/bin/killall -HUP mDNSResponder" with administrator privileges"#
+
+    static func makeResetZoomDataCommand(homeDirectory: String) -> String {
+        let home = shellSingleQuote(homeDirectory)
+        return """
+        home=\(home)
+        zoom_data="$home/Library/Application Support/zoom.us"
+        zoom_cache="$home/Library/Caches/us.zoom.xos"
+        zoom_prefs="$home/Library/Preferences/us.zoom.xos.plist"
+        zoom_logs="$home/Library/Logs/zoom.us.log"
+        zoom_saved_state="$home/Library/Saved Application State/us.zoom.xos.savedState"
+
+        /bin/rm -rf "$zoom_data" "$zoom_cache" "$zoom_prefs" "$zoom_saved_state"
+        /bin/rm -f "$zoom_logs"*
+        HOME="$home" /usr/bin/defaults delete us.zoom.xos >/dev/null 2>&1 || true
+
+        remaining=0
+        for path in "$zoom_data" "$zoom_cache" "$zoom_prefs" "$zoom_saved_state"; do
+          if [ -e "$path" ]; then
+            echo "Warning: Could not remove $path" >&2
+            remaining=1
+          fi
+        done
+
+        if /bin/ls "$zoom_logs"* >/dev/null 2>&1; then
+          echo "Warning: Could not remove Zoom log files matching $zoom_logs*" >&2
+          remaining=1
+        fi
+
+        exit "$remaining"
+        """
+    }
 
     static func makeBackupZoomDataCommand() -> String {
         let timestamp = ISO8601DateFormatter().string(from: Date())
@@ -175,6 +204,9 @@ Turn off your VPN, wait a few seconds for your normal connection to restore, and
         if normalized.contains("ethernet") {
             return .ethernet
         }
+        if normalized.contains("usb") && normalized.contains("lan") {
+            return .ethernet
+        }
 
         throw NSError(domain: "1132Fixer", code: 1, userInfo: [NSLocalizedDescriptionKey: "Detect active network interface: Active interface '\(hardwarePortName)' is not supported. Only Wi-Fi and Ethernet are supported."])
     }
@@ -245,6 +277,34 @@ Turn off your VPN, wait a few seconds for your normal connection to restore, and
 
     static func makeSetPrivateAddressModeCommand(networkService: String, mode: String) -> String {
         "/usr/sbin/networksetup -setPrivateNetworkAddress \(shellSingleQuote(networkService)) \(shellSingleQuote(mode))"
+    }
+
+    static func normalizePrivateAddressModeOutput(_ output: String) -> String {
+        let normalizedLines = output
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+
+        for mode in ["rotating", "fixed", "static", "off"] {
+            if normalizedLines.contains(mode) {
+                return mode
+            }
+        }
+
+        let normalizedOutput = normalizedLines.joined(separator: "\n")
+        if normalizedOutput.contains("not recognized")
+            || normalizedOutput.contains("unsupported")
+            || normalizedOutput.contains("networksetup -printcommands") {
+            return "unsupported"
+        }
+
+        for mode in ["rotating", "fixed", "static", "off"] {
+            if normalizedOutput.contains(mode) {
+                return mode
+            }
+        }
+
+        return normalizedOutput.isEmpty ? "unsupported" : normalizedOutput
     }
 
     /// Cycles the Wi-Fi interface off then on to generate a new rotating MAC address.
@@ -396,7 +456,7 @@ Turn off your VPN, wait a few seconds for your normal connection to restore, and
         trap cleanup EXIT
         /bin/echo "$encoded_profile" | /usr/bin/base64 --decode > "$profile_path" || exit 1
 
-        echo "Launch mode: bootstrapThenNormal"
+        echo "Launch mode: bootstrapThenPersistentSandbox"
         /usr/bin/sandbox-exec -f "$profile_path" "$zoom_binary" >/dev/null 2>&1 &
         bootstrap_pid=$!
         /bin/sleep 1
@@ -428,26 +488,16 @@ Turn off your VPN, wait a few seconds for your normal connection to restore, and
           echo "Heuristic: bootstrap shutdown confirmed = no"
         fi
 
-        /usr/bin/open -na "zoom.us"
-        if wait_for_zoom_stability 1 6; then
-          echo "Heuristic: normal relaunch detected"
-        else
-          echo "Heuristic: normal relaunch detected = no"
-          echo "Heuristic: fallback triggered (normal relaunch not detected)"
-          stop_zoom_processes
-          launch_persistent_sandbox || exit 1
-          exit 0
-        fi
-
-        if wait_for_zoom_stability 4 12; then
-          echo "Heuristic: normal relaunch stabilized"
-          exit 0
-        fi
-
-        echo "Heuristic: normal relaunch stabilized = no"
-        echo "Heuristic: fallback triggered (normal relaunch unstable)"
         stop_zoom_processes
         launch_persistent_sandbox || exit 1
+
+        if wait_for_zoom_stability 4 12; then
+          echo "Heuristic: persistent sandbox launch stabilized"
+          exit 0
+        fi
+
+        echo "Heuristic: persistent sandbox launch stabilized = no"
+        exit 1
         '
         """
     }

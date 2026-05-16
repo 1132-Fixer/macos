@@ -136,6 +136,11 @@ struct ShellCommandsTests {
         #expect(kind == .ethernet)
     }
 
+    @Test func classifyUSBLANAsEthernet() throws {
+        let kind = try ShellCommands.classifySupportedInterface(hardwarePortName: "USB 10/100/1000 LAN")
+        #expect(kind == .ethernet)
+    }
+
     @Test func classifyUnsupported() {
         #expect(throws: (any Error).self) {
             try ShellCommands.classifySupportedInterface(hardwarePortName: "Bluetooth PAN")
@@ -200,6 +205,19 @@ struct ShellCommandsTests {
         #expect(cmd.contains("ifconfig"))
         #expect(cmd.contains("'en0'"))
         #expect(cmd.contains("ether"))
+    }
+
+    @Test func normalizePrivateAddressModeOutput() {
+        #expect(ShellCommands.normalizePrivateAddressModeOutput("Rotating\n") == "rotating")
+        #expect(ShellCommands.normalizePrivateAddressModeOutput("** Error: The command is not recognized.") == "unsupported")
+        #expect(ShellCommands.normalizePrivateAddressModeOutput("networksetup -listnetworkserviceorder\nnetworksetup -printcommands") == "unsupported")
+    }
+
+    @Test func makeResetZoomDataCommandUsesProvidedHome() {
+        let cmd = ShellCommands.makeResetZoomDataCommand(homeDirectory: "/Users/test user")
+        #expect(cmd.contains("home='/Users/test user'"))
+        #expect(cmd.contains("Application Support/zoom.us"))
+        #expect(cmd.contains("exit \"$remaining\""))
     }
 
     // MARK: - Machine Architecture
