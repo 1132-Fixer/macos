@@ -342,7 +342,11 @@ Turn off your VPN, wait a few seconds for your normal connection to restore, and
     // MARK: - Launch Zoom
 
     static func makeLaunchZoomCommand() -> String {
-        guard FileManager.default.fileExists(atPath: zoomBinaryPath) else {
+        makeLaunchZoomCommand(zoomBinaryExists: FileManager.default.fileExists(atPath: zoomBinaryPath))
+    }
+
+    static func makeLaunchZoomCommand(zoomBinaryExists: Bool) -> String {
+        guard zoomBinaryExists else {
             return #"""
             echo "Launch mode: directOpenFallback (Zoom binary not found at expected path)"
             echo "Warning: Zoom does not appear to be installed at /Applications/zoom.us.app. The sandbox bypass cannot run without the Zoom binary. Falling back to a normal open command."
@@ -440,23 +444,22 @@ Turn off your VPN, wait a few seconds for your normal connection to restore, and
           fi
         }
 
-        launch_persistent_sandbox() {
-          echo "Launch mode escalated: persistentSandbox"
-          /usr/bin/sandbox-exec -f "$profile_path" "$zoom_binary" >/dev/null 2>&1 &
-          persistent_pid=$!
+        launch_normal_zoom() {
+          echo "Launch mode escalated: normalOpen"
+          /usr/bin/open -a "zoom.us" >/dev/null 2>&1
           /bin/sleep 2
-          if /bin/kill -0 "$persistent_pid" 2>/dev/null || /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1; then
-            echo "Heuristic: persistent sandbox launch detected"
+          if /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1; then
+            echo "Heuristic: normal launch detected"
             return 0
           fi
-          echo "Heuristic: persistent sandbox launch detected = no"
+          echo "Heuristic: normal launch detected = no"
           return 1
         }
 
         trap cleanup EXIT
         /bin/echo "$encoded_profile" | /usr/bin/base64 --decode > "$profile_path" || exit 1
 
-        echo "Launch mode: bootstrapThenPersistentSandbox"
+        echo "Launch mode: bootstrapThenNormalOpen"
         /usr/bin/sandbox-exec -f "$profile_path" "$zoom_binary" >/dev/null 2>&1 &
         bootstrap_pid=$!
         /bin/sleep 1
@@ -467,7 +470,7 @@ Turn off your VPN, wait a few seconds for your normal connection to restore, and
           echo "Heuristic: bootstrap started = no"
           echo "Heuristic: fallback triggered (bootstrap process missing)"
           stop_zoom_processes
-          launch_persistent_sandbox || exit 1
+          launch_normal_zoom || exit 1
           exit 0
         fi
 
@@ -477,7 +480,7 @@ Turn off your VPN, wait a few seconds for your normal connection to restore, and
           echo "Heuristic: bootstrap survived minimum runtime = no"
           echo "Heuristic: fallback triggered (bootstrap exited too quickly)"
           stop_zoom_processes
-          launch_persistent_sandbox || exit 1
+          launch_normal_zoom || exit 1
           exit 0
         fi
 
@@ -489,14 +492,14 @@ Turn off your VPN, wait a few seconds for your normal connection to restore, and
         fi
 
         stop_zoom_processes
-        launch_persistent_sandbox || exit 1
+        launch_normal_zoom || exit 1
 
         if wait_for_zoom_stability 4 12; then
-          echo "Heuristic: persistent sandbox launch stabilized"
+          echo "Heuristic: normal launch stabilized"
           exit 0
         fi
 
-        echo "Heuristic: persistent sandbox launch stabilized = no"
+        echo "Heuristic: normal launch stabilized = no"
         exit 1
         '
         """

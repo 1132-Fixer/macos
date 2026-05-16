@@ -220,6 +220,23 @@ struct ShellCommandsTests {
         #expect(cmd.contains("exit \"$remaining\""))
     }
 
+    @Test func makeLaunchZoomCommandBootstrapsSandboxThenOpensNormally() {
+        let cmd = ShellCommands.makeLaunchZoomCommand(zoomBinaryExists: true)
+        #expect(cmd.contains("Launch mode: bootstrapThenNormalOpen"))
+        #expect(cmd.contains("(allow device-camera)"))
+        #expect(cmd.contains("(allow device-microphone)"))
+        #expect(cmd.contains(#"/usr/bin/open -a "zoom.us""#))
+        #expect(!cmd.contains("persistentSandbox"))
+        #expect(!cmd.contains("bootstrapThenPersistentSandbox"))
+    }
+
+    @Test func makeLaunchZoomCommandFallsBackWhenZoomBinaryIsMissing() {
+        let cmd = ShellCommands.makeLaunchZoomCommand(zoomBinaryExists: false)
+        #expect(cmd.contains("Launch mode: directOpenFallback"))
+        #expect(cmd.contains(#"/usr/bin/open -a "zoom.us""#))
+        #expect(!cmd.contains("/usr/bin/sandbox-exec"))
+    }
+
     // MARK: - Machine Architecture
 
     @Test func machineArchitecture() {
