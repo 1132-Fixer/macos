@@ -269,6 +269,10 @@ Turn off your VPN, wait a few seconds for your normal connection to restore, and
         return isAppleSilicon && isMacOS14OrLater
     }
 
+    static func isMacSpoofingDisabledForCurrentOS() -> Bool {
+        ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 14
+    }
+
     // MARK: - Private Wi-Fi Address (Rotating MAC)
 
     static func makeGetPrivateAddressModeCommand(networkService: String) -> String {
@@ -341,6 +345,36 @@ Turn off your VPN, wait a few seconds for your normal connection to restore, and
 
     // MARK: - Launch Zoom
 
+    // Zoom must stay inside sandbox-exec for this app. Do not replace this
+    // profile-backed launch with /usr/bin/open or any other normal Zoom launch.
+    static let zoomSandboxProfile = """
+    (version 1)
+    (allow default)
+
+    ; Camera and microphone access must remain explicit because Zoom runs under
+    ; sandbox-exec for the full session, including video capture.
+    (allow device-camera)
+    (allow device-microphone)
+    (allow mach-lookup
+        (global-name "com.apple.cmio.VDCAssistant")
+        (global-name "com.apple.cmio.AppleCameraAssistant")
+        (global-name "com.apple.cmio.registerassistantservice")
+        (global-name "com.apple.tccd")
+        (global-name "com.apple.audio.coreaudiod")
+        (global-name "com.apple.audio.AudioComponentRegistrar")
+    )
+
+    (deny iokit-get-properties
+        (iokit-property "IOPlatformSerialNumber")
+        (iokit-property "IOPlatformUUID")
+        (iokit-property "board-id")
+        (iokit-property "IOMACAddress")
+    )
+    (deny file-read-data
+        (literal "/Library/Preferences/SystemConfiguration/NetworkInterfaces.plist")
+    )
+    """
+
     static func makeLaunchZoomCommand() -> String {
         makeLaunchZoomCommand(zoomBinaryExists: FileManager.default.fileExists(atPath: zoomBinaryPath))
     }
@@ -348,28 +382,13 @@ Turn off your VPN, wait a few seconds for your normal connection to restore, and
     static func makeLaunchZoomCommand(zoomBinaryExists: Bool) -> String {
         guard zoomBinaryExists else {
             return #"""
-            echo "Launch mode: directOpenFallback (Zoom binary not found at expected path)"
-            echo "Warning: Zoom does not appear to be installed at /Applications/zoom.us.app. The sandbox bypass cannot run without the Zoom binary. Falling back to a normal open command."
-            /usr/bin/open -a "zoom.us" || { echo "Error: Could not open Zoom. Please install Zoom from https://zoom.us/download and try again."; exit 1; }
+            echo "Launch mode: sandboxRequiredMissingBinary"
+            echo "Error: Zoom must be launched in sandbox mode, but the Zoom binary was not found at /Applications/zoom.us.app/Contents/MacOS/zoom.us. Install Zoom from https://zoom.us/download and try again."
+            exit 1
             """#
         }
 
-        let profile = """
-        (version 1)
-        (allow default)
-        (allow device-camera)
-        (allow device-microphone)
-        (deny iokit-get-properties
-            (iokit-property "IOPlatformSerialNumber")
-            (iokit-property "IOPlatformUUID")
-            (iokit-property "board-id")
-            (iokit-property "IOMACAddress")
-        )
-        (deny file-read-data
-            (literal "/Library/Preferences/SystemConfiguration/NetworkInterfaces.plist")
-        )
-        """
-        let encodedProfile = Data(profile.utf8).base64EncodedString()
+        let encodedProfile = Data(zoomSandboxProfile.utf8).base64EncodedString()
         return """
         /bin/bash -c '
         set -u
@@ -382,35 +401,7 @@ Turn off your VPN, wait a few seconds for your normal connection to restore, and
           /bin/rm -f "$profile_path"
         }
 
-        wait_for_pid_runtime() {
-          pid="$1"
-          seconds="$2"
-          i=0
-          while [ "$i" -lt "$seconds" ]; do
-            if ! /bin/kill -0 "$pid" 2>/dev/null; then
-              return 1
-            fi
-            /bin/sleep 1
-            i=$((i + 1))
-          done
-          return 0
-        }
-
-        wait_for_pid_exit() {
-          pid="$1"
-          attempts="$2"
-          i=0
-          while [ "$i" -lt "$attempts" ]; do
-            if ! /bin/kill -0 "$pid" 2>/dev/null; then
-              return 0
-            fi
-            /bin/sleep 1
-            i=$((i + 1))
-          done
-          return 1
-        }
-
-        wait_for_zoom_stability() {
+        wait_for_sandboxed_zoom_stability() {
           required_consecutive="$1"
           max_attempts="$2"
           i=0
@@ -444,62 +435,36 @@ Turn off your VPN, wait a few seconds for your normal connection to restore, and
           fi
         }
 
-        launch_normal_zoom() {
-          echo "Launch mode escalated: normalOpen"
-          /usr/bin/open -a "zoom.us" >/dev/null 2>&1
-          /bin/sleep 2
-          if /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1; then
-            echo "Heuristic: normal launch detected"
-            return 0
-          fi
-          echo "Heuristic: normal launch detected = no"
-          return 1
-        }
-
         trap cleanup EXIT
         /bin/echo "$encoded_profile" | /usr/bin/base64 --decode > "$profile_path" || exit 1
 
-        echo "Launch mode: bootstrapThenNormalOpen"
+        # Sandbox mode is required for 1132 Fixer. Normal Zoom launch mode does
+        # not work for this workflow, so there is intentionally no open -a
+        # fallback here.
+        echo "Launch mode: persistentSandbox"
+        stop_zoom_processes
         /usr/bin/sandbox-exec -f "$profile_path" "$zoom_binary" >/dev/null 2>&1 &
-        bootstrap_pid=$!
+        sandbox_pid=$!
         /bin/sleep 1
 
-        if /bin/kill -0 "$bootstrap_pid" 2>/dev/null; then
-          echo "Heuristic: bootstrap started"
+        if /bin/kill -0 "$sandbox_pid" 2>/dev/null || /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1; then
+          echo "Heuristic: sandbox launch started"
         else
-          echo "Heuristic: bootstrap started = no"
-          echo "Heuristic: fallback triggered (bootstrap process missing)"
-          stop_zoom_processes
-          launch_normal_zoom || exit 1
+          echo "Heuristic: sandbox launch started = no"
+          exit 1
+        fi
+
+        if wait_for_sandboxed_zoom_stability 4 15; then
+          echo "Heuristic: sandbox launch stabilized"
           exit 0
         fi
 
-        if wait_for_pid_runtime "$bootstrap_pid" 11; then
-          echo "Heuristic: bootstrap survived minimum runtime"
-        else
-          echo "Heuristic: bootstrap survived minimum runtime = no"
-          echo "Heuristic: fallback triggered (bootstrap exited too quickly)"
-          stop_zoom_processes
-          launch_normal_zoom || exit 1
+        if /bin/kill -0 "$sandbox_pid" 2>/dev/null; then
+          echo "Heuristic: sandbox process still running without process-name stability confirmation"
           exit 0
         fi
 
-        /bin/kill "$bootstrap_pid" 2>/dev/null || true
-        if wait_for_pid_exit "$bootstrap_pid" 5; then
-          echo "Heuristic: bootstrap shutdown confirmed"
-        else
-          echo "Heuristic: bootstrap shutdown confirmed = no"
-        fi
-
-        stop_zoom_processes
-        launch_normal_zoom || exit 1
-
-        if wait_for_zoom_stability 4 12; then
-          echo "Heuristic: normal launch stabilized"
-          exit 0
-        fi
-
-        echo "Heuristic: normal launch stabilized = no"
+        echo "Heuristic: sandbox launch stabilized = no"
         exit 1
         '
         """

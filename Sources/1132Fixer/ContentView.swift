@@ -27,6 +27,7 @@ final class AppViewModel: ObservableObject {
     private struct MACSpoofResult {
         let summary: String
         let hasWarning: Bool
+        let wasSkipped: Bool
     }
 
     private enum Constants {
@@ -70,6 +71,7 @@ final class AppViewModel: ObservableObject {
         case preflight
         case closingZoom
         case spoofingMAC
+        case checkingNetwork
         case backingUpState
         case clearingState
         case flushingDNS
@@ -135,7 +137,7 @@ final class AppViewModel: ObservableObject {
         lastRunResults = nil
         initProgress(steps: [
             ("closeZoom", "Close Zoom"),
-            ("macSpoof", "MAC Spoof & Network"),
+            ("network", ShellCommands.isMacSpoofingDisabledForCurrentOS() ? "Network Check" : "MAC Spoof & Network"),
             ("backup", "Backup State"),
             ("resetData", "Clear Local State"),
             ("dns", "DNS Flush"),
@@ -163,19 +165,30 @@ final class AppViewModel: ObservableObject {
                 self.appendLog("Warning: \(error.localizedDescription)")
             }
 
-            // 2. Spoof MAC
-            self.workflowState = .spoofingMAC
-            self.markStepRunning("macSpoof")
-            self.appendLog("Step: Spoof MAC and reconnect active network (admin prompt expected)")
+            // 2. Network handling
+            self.workflowState = ShellCommands.isMacSpoofingDisabledForCurrentOS() ? .checkingNetwork : .spoofingMAC
+            self.markStepRunning("network")
+            self.appendLog(ShellCommands.isMacSpoofingDisabledForCurrentOS()
+                ? "Step: Check active network; MAC spoofing is disabled on macOS 14+"
+                : "Step: Spoof MAC and reconnect active network (admin prompt expected)")
             let macSpoofResult: MACSpoofResult
             do {
                 macSpoofResult = try await self.spoofMACAndReconnectActiveInterface()
-                self.markStepDone("macSpoof", succeeded: !macSpoofResult.hasWarning)
-                results.append(.init(id: "macSpoof", name: "MAC Spoof & Network", succeeded: !macSpoofResult.hasWarning, detail: macSpoofResult.summary))
+                if macSpoofResult.wasSkipped {
+                    self.markStepSkipped("network")
+                } else {
+                    self.markStepDone("network", succeeded: !macSpoofResult.hasWarning)
+                }
+                results.append(.init(
+                    id: "network",
+                    name: ShellCommands.isMacSpoofingDisabledForCurrentOS() ? "Network Check" : "MAC Spoof & Network",
+                    succeeded: !macSpoofResult.hasWarning,
+                    detail: macSpoofResult.summary
+                ))
             } catch {
-                macSpoofResult = MACSpoofResult(summary: "MAC spoofing skipped: \(error.localizedDescription)", hasWarning: true)
-                self.markStepDone("macSpoof", succeeded: false)
-                results.append(.init(id: "macSpoof", name: "MAC Spoof & Network", succeeded: false, detail: error.localizedDescription))
+                macSpoofResult = MACSpoofResult(summary: "Network step skipped: \(error.localizedDescription)", hasWarning: true, wasSkipped: true)
+                self.markStepDone("network", succeeded: false)
+                results.append(.init(id: "network", name: "Network Check", succeeded: false, detail: error.localizedDescription))
             }
 
             // 3. Backup Zoom state
@@ -312,6 +325,13 @@ final class AppViewModel: ObservableObject {
         workflowProgress = progress
     }
 
+    private func markStepSkipped(_ id: String) {
+        guard var progress = workflowProgress,
+              let idx = progress.steps.firstIndex(where: { $0.id == id }) else { return }
+        progress.steps[idx].state = .skipped
+        workflowProgress = progress
+    }
+
     func cancelWorkflow() {
         runningTask?.cancel()
         currentProcess?.terminate()
@@ -365,7 +385,9 @@ final class AppViewModel: ObservableObject {
 
                 if let kind = try? ShellCommands.classifySupportedInterface(hardwarePortName: portName) {
                     results.append("Interface type: \(kind.rawValue)")
-                    if kind == .wifi && ShellCommands.isMacSpoofingBlockedOnWiFi() {
+                    if ShellCommands.isMacSpoofingDisabledForCurrentOS() {
+                        results.append("MAC spoofing: Disabled on macOS 14+")
+                    } else if kind == .wifi && ShellCommands.isMacSpoofingBlockedOnWiFi() {
                         results.append("MAC spoofing: BLOCKED (Apple Silicon + macOS 14+)")
                     } else {
                         results.append("MAC spoofing: Available")
@@ -432,11 +454,13 @@ final class AppViewModel: ObservableObject {
                 }
             }
 
-            // Admin prompts expected (MAC spoofing + DNS flush both need admin)
+            // Admin prompts expected (DNS flush needs admin; MAC spoofing on supported macOS also needs admin)
             checks.append(.init(id: "admin", label: "Admin Prompts", value: "Expected", isWarning: false))
 
             // MAC spoofing availability
-            if ShellCommands.isMacSpoofingBlockedOnWiFi() {
+            if ShellCommands.isMacSpoofingDisabledForCurrentOS() {
+                checks.append(.init(id: "macspoof", label: "MAC Spoofing", value: "Disabled on macOS 14+", isWarning: false))
+            } else if ShellCommands.isMacSpoofingBlockedOnWiFi() {
                 checks.append(.init(id: "macspoof", label: "MAC Spoofing", value: "Blocked on Wi-Fi (Apple Silicon + macOS 14+)", isWarning: true))
             }
 
@@ -602,6 +626,14 @@ Last action status: \(lastStatus)
     private func spoofMACAndReconnectActiveInterface() async throws -> MACSpoofResult {
         let interface = try await resolveActiveSupportedInterface()
 
+        if ShellCommands.isMacSpoofingDisabledForCurrentOS() {
+            return MACSpoofResult(
+                summary: "MAC spoofing is disabled on macOS 14 and later because the old spoofing method no longer works reliably. Active network: \(interface.kind.rawValue) (\(interface.device), service: \(interface.networkService)).",
+                hasWarning: false,
+                wasSkipped: true
+            )
+        }
+
         if interface.kind == .wifi && ShellCommands.isMacSpoofingBlockedOnWiFi() {
             return try await resetPrivateWiFiAddressAndReconnect(networkService: interface.networkService, device: interface.device)
         }
@@ -677,7 +709,8 @@ If your network connection is disrupted after this step:
 
         return MACSpoofResult(
             summary: combinedSummary,
-            hasWarning: combinedSummary.contains("Warning:")
+            hasWarning: combinedSummary.contains("Warning:"),
+            wasSkipped: false
         )
     }
 
@@ -759,7 +792,8 @@ If your network connection is disrupted after this step:
 
         return MACSpoofResult(
             summary: summaryParts.joined(separator: "\n"),
-            hasWarning: !warnings.isEmpty
+            hasWarning: !warnings.isEmpty,
+            wasSkipped: false
         )
     }
 
@@ -972,7 +1006,7 @@ struct ContentView: View {
                 HStack(spacing: 14) {
                     ActionCard(
                         title: "Start Zoom",
-                        subtitle: "Spoofs MAC on active Wi-Fi/Ethernet and reconnects it, then resets Zoom data, refreshes DNS cache, and launches Zoom.",
+                        subtitle: "Checks the active network, resets Zoom data, refreshes DNS cache, and launches Zoom in sandbox mode.",
                         systemImage: "video.circle.fill",
                         tint: Color(red: 0.13, green: 0.50, blue: 0.86),
                         isDisabled: vm.isRunning,

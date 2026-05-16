@@ -36,6 +36,14 @@ Versioning Checks:
 - Keep code compatible with Swift 5.9 and macOS 13 APIs.
 - Keep UI changes in SwiftUI and follow existing visual/component patterns.
 
+## 1132 Fixer Zoom Launch Rules
+
+- Zoom must always run in sandbox mode.
+- Normal Zoom launch mode does not work for this app and must not be restored.
+- Do not add fallback logic that launches Zoom outside sandbox mode.
+- Camera settings must remain compatible with sandbox mode.
+- Any future changes touching Zoom launch, restart, repair, camera permissions, or camera settings must preserve sandbox-mode behavior.
+
 ## Code Review Guidelines
 - Prefer small, focused changes over broad refactors.
 - Preserve existing behavior unless the task explicitly specifies which behavior to change and how.

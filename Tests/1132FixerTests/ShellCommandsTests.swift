@@ -220,20 +220,27 @@ struct ShellCommandsTests {
         #expect(cmd.contains("exit \"$remaining\""))
     }
 
-    @Test func makeLaunchZoomCommandBootstrapsSandboxThenOpensNormally() {
-        let cmd = ShellCommands.makeLaunchZoomCommand(zoomBinaryExists: true)
-        #expect(cmd.contains("Launch mode: bootstrapThenNormalOpen"))
-        #expect(cmd.contains("(allow device-camera)"))
-        #expect(cmd.contains("(allow device-microphone)"))
-        #expect(cmd.contains(#"/usr/bin/open -a "zoom.us""#))
-        #expect(!cmd.contains("persistentSandbox"))
-        #expect(!cmd.contains("bootstrapThenPersistentSandbox"))
+    @Test func zoomSandboxProfileAllowsCameraAndMicrophone() {
+        #expect(ShellCommands.zoomSandboxProfile.contains("(allow device-camera)"))
+        #expect(ShellCommands.zoomSandboxProfile.contains("(allow device-microphone)"))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.cmio.VDCAssistant""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.tccd""#))
     }
 
-    @Test func makeLaunchZoomCommandFallsBackWhenZoomBinaryIsMissing() {
+    @Test func makeLaunchZoomCommandUsesPersistentSandboxOnly() {
+        let cmd = ShellCommands.makeLaunchZoomCommand(zoomBinaryExists: true)
+        #expect(cmd.contains("Launch mode: persistentSandbox"))
+        #expect(cmd.contains("/usr/bin/sandbox-exec"))
+        #expect(!cmd.contains(#"/usr/bin/open -a "zoom.us""#))
+        #expect(!cmd.contains("launch_normal_zoom"))
+        #expect(!cmd.contains("normalOpen"))
+    }
+
+    @Test func makeLaunchZoomCommandFailsWhenZoomBinaryIsMissing() {
         let cmd = ShellCommands.makeLaunchZoomCommand(zoomBinaryExists: false)
-        #expect(cmd.contains("Launch mode: directOpenFallback"))
-        #expect(cmd.contains(#"/usr/bin/open -a "zoom.us""#))
+        #expect(cmd.contains("Launch mode: sandboxRequiredMissingBinary"))
+        #expect(cmd.contains("Zoom must be launched in sandbox mode"))
+        #expect(!cmd.contains(#"/usr/bin/open -a "zoom.us""#))
         #expect(!cmd.contains("/usr/bin/sandbox-exec"))
     }
 
