@@ -223,14 +223,34 @@ struct ShellCommandsTests {
     @Test func zoomSandboxProfileAllowsCameraAndMicrophone() {
         #expect(ShellCommands.zoomSandboxProfile.contains("(allow device-camera)"))
         #expect(ShellCommands.zoomSandboxProfile.contains("(allow device-microphone)"))
+        #expect(ShellCommands.zoomSandboxProfile.contains("(allow iokit-get-properties)"))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""AppleH13CamInUserClient""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""AppleUSBHostFrameworkInterfaceClient""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""IOUSBInterfaceUserClientV3""#))
         #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.cmio.VDCAssistant""#))
         #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.tccd""#))
         #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.tccd.system""#))
         #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.applecamerad""#))
         #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.appleh13camerad""#))
         #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.appleh16camerad""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.cmio.AVCAssistant""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.cmio.IIDCVideoAssistant""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.cmio.iOSScreenCaptureAssistant""#))
         #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.cmio.registerassistantservice.system-extensions""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.cmio.system-extensions""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.coremedia.endpoint.xpc""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.mediaexperience.endpoint.xpc""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.runningboard""#))
         #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.videoconference.camera""#))
+    }
+
+    @Test func stopZoomCommandsClearCaptureHelpers() {
+        #expect(ShellCommands.stopZoom.contains(#""caphost""#))
+        #expect(ShellCommands.stopZoom.contains(#""CptHost""#))
+
+        let cmd = ShellCommands.makeLaunchZoomCommand(zoomBinaryExists: true)
+        #expect(cmd.contains(#""caphost""#))
+        #expect(cmd.contains(#""CptHost""#))
     }
 
     @Test func makeLaunchZoomCommandUsesPersistentSandboxOnly() {

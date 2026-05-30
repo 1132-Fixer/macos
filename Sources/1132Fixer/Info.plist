@@ -21,7 +21,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.6.0</string>
+	<string>1.6.1</string>
 	<key>CFBundleSupportedPlatforms</key>
 	<array>
 		<string>MacOSX</string>
@@ -40,10 +40,6 @@
 	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>1132 Fixer may need Bluetooth access to inspect Bluetooth-connected network interfaces.</string>
-	<key>NSCameraUsageDescription</key>
-	<string>1132 Fixer checks camera access before launching Zoom in sandbox mode.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>1132 Fixer checks microphone access before launching Zoom in sandbox mode.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>1132 Fixer needs to send Apple Events to manage network settings and application processes.</string>
 	<key>NSSystemAdministrationUsageDescription</key>

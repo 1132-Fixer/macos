@@ -22,15 +22,22 @@ enum ShellCommands {
     // MARK: - Command Strings
 
     static let stopZoom = #"""
-    if /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1; then
-      /usr/bin/killall "zoom.us" 2>/dev/null || true
+    zoom_processes="zoom.us caphost CptHost"
+    if /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1 || /usr/bin/pgrep -x "caphost" >/dev/null 2>&1 || /usr/bin/pgrep -x "CptHost" >/dev/null 2>&1; then
+      for proc in $zoom_processes; do
+        /usr/bin/killall "$proc" 2>/dev/null || true
+      done
       echo "Zoom was running and has been closed."
       for i in {1..10}; do
-        /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1 || break
+        if ! /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1 && ! /usr/bin/pgrep -x "caphost" >/dev/null 2>&1 && ! /usr/bin/pgrep -x "CptHost" >/dev/null 2>&1; then
+          break
+        fi
         /bin/sleep 0.5
       done
-      if /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1; then
-        /usr/bin/killall -9 "zoom.us" 2>/dev/null || true
+      if /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1 || /usr/bin/pgrep -x "caphost" >/dev/null 2>&1 || /usr/bin/pgrep -x "CptHost" >/dev/null 2>&1; then
+        for proc in $zoom_processes; do
+          /usr/bin/killall -9 "$proc" 2>/dev/null || true
+        done
         /bin/sleep 1
       fi
     fi
@@ -352,24 +359,55 @@ Turn off your VPN, wait a few seconds for your normal connection to restore, and
     (allow default)
 
     ; Camera and microphone access must remain explicit because Zoom runs under
-    ; sandbox-exec for the full session, including video capture.
+    ; sandbox-exec for the full session, including helper-based video capture.
     (allow device-camera)
     (allow device-microphone)
+    (allow iokit-get-properties)
+    (allow iokit-open
+        (iokit-user-client-class "AppleAVE2UserClient")
+        (iokit-user-client-class "AppleH13CamInUserClient")
+        (iokit-user-client-class "AppleUSBHostFrameworkInterfaceClient")
+        (iokit-user-client-class "H11ANEInDirectPathClient")
+        (iokit-user-client-class "H1xANELoadBalancerClient")
+        (iokit-user-client-class "H1xANELoadBalancerDirectPathClient")
+        (iokit-user-client-class "IOSurfaceRootUserClient")
+        (iokit-user-client-class "IOUSBDeviceUserClientV2")
+        (iokit-user-client-class "IOUSBInterfaceUserClientV2")
+        (iokit-user-client-class "IOUSBInterfaceUserClientV3")
+        (iokit-user-client-class "IOUserUserClient")
+        (iokit-user-client-class "RootDomainUserClient")
+    )
     (allow mach-lookup
+        (global-name "com.apple.SecurityServer")
         (global-name "com.apple.applecamerad")
         (global-name "com.apple.appleh13camerad")
         (global-name "com.apple.appleh16camerad")
+        (global-name "com.apple.airplay.endpoint.xpc")
+        (global-name "com.apple.audio.AudioComponentRegistrar")
+        (global-name "com.apple.audio.AudioSession")
+        (global-name "com.apple.audio.audiohald")
+        (global-name "com.apple.audio.coreaudiod")
+        (global-name "com.apple.cmio.AVCAssistant")
         (global-name "com.apple.cmio.VDCAssistant")
         (global-name "com.apple.cmio.AppleCameraAssistant")
+        (global-name "com.apple.cmio.IIDCVideoAssistant")
+        (global-name "com.apple.cmio.iOSScreenCaptureAssistant")
         (global-name "com.apple.cmio.registerassistantservice")
         (global-name "com.apple.cmio.registerassistantservice.system-extensions")
-        (global-name "com.apple.videoconference.camera")
+        (global-name "com.apple.cmio.system-extensions")
+        (global-name "com.apple.coreservices.launchservicesd")
+        (global-name "com.apple.coremedia.endpoint.xpc")
+        (global-name "com.apple.coremedia.virtualdisplaycg")
+        (global-name "com.apple.lsd.modifydb")
+        (global-name "com.apple.mediaexperience.endpoint.xpc")
+        (global-name "com.apple.pluginkit.pkd")
+        (global-name "com.apple.rtcreportingd")
+        (global-name "com.apple.runningboard")
+        (global-name "com.apple.securityd.xpc")
         (global-name "com.apple.tccd")
         (global-name "com.apple.tccd.system")
-        (global-name "com.apple.audio.coreaudiod")
-        (global-name "com.apple.audio.audiohald")
-        (global-name "com.apple.audio.AudioSession")
-        (global-name "com.apple.audio.AudioComponentRegistrar")
+        (global-name "com.apple.videoconference.camera")
+        (global-name "com.apple.windowserver.active")
     )
 
     (deny iokit-get-properties
@@ -430,14 +468,21 @@ Turn off your VPN, wait a few seconds for your normal connection to restore, and
         }
 
         stop_zoom_processes() {
-          if /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1; then
-            /usr/bin/killall "zoom.us" 2>/dev/null || true
+          zoom_processes="zoom.us caphost CptHost"
+          if /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1 || /usr/bin/pgrep -x "caphost" >/dev/null 2>&1 || /usr/bin/pgrep -x "CptHost" >/dev/null 2>&1; then
+            for proc in $zoom_processes; do
+              /usr/bin/killall "$proc" 2>/dev/null || true
+            done
             for i in {1..6}; do
-              /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1 || break
+              if ! /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1 && ! /usr/bin/pgrep -x "caphost" >/dev/null 2>&1 && ! /usr/bin/pgrep -x "CptHost" >/dev/null 2>&1; then
+                break
+              fi
               /bin/sleep 0.5
             done
-            if /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1; then
-              /usr/bin/killall -9 "zoom.us" 2>/dev/null || true
+            if /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1 || /usr/bin/pgrep -x "caphost" >/dev/null 2>&1 || /usr/bin/pgrep -x "CptHost" >/dev/null 2>&1; then
+              for proc in $zoom_processes; do
+                /usr/bin/killall -9 "$proc" 2>/dev/null || true
+              done
               /bin/sleep 1
             fi
           fi
