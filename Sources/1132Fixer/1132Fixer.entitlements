@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Hardened-runtime resource-access entitlements. Required because 1132 Fixer
+	  is the TCC "responsible" process for the sandboxed Zoom session: tccd refuses
+	  to even prompt for camera/microphone unless the responsible hardened-runtime
+	  app carries these entitlements (verified via the TCC log: "requires
+	  entitlement com.apple.security.device.audio-input but it is missing").
+	  This is NOT App Sandbox (com.apple.security.app-sandbox is intentionally
+	  absent) — adding the sandbox would break the sandbox-exec Zoom launch.
+	-->
+	<key>com.apple.security.device.camera</key>
+	<true/>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<!-- Needed for the AppleScript/Apple Events the workflow uses (e.g. quitting Zoom). -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+</dict>
+</plist>
