@@ -533,6 +533,8 @@ Last action status: \(lastStatus)
         lines.append("Architecture: \(arch)")
         lines.append("Last action status: \(lastStatus)")
         lines.append("")
+        lines.append(contentsOf: DiagnosticsCollector.makeSnapshot())
+        lines.append("")
 
         if let results = lastRunResults {
             lines.append("--- Step Results ---")

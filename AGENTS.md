@@ -22,16 +22,6 @@
 - **Compatibility:** Target Swift 5.9 and macOS 13; use SwiftUI for UI work.
 - **Validation:** Run `swift build` and `swift run` as appropriate before committing.
 
-## Versioning Rules
-- When making code changes, ensure `VERSION` reflects the new version before committing.
-- If `VERSION` already contains an uncommitted bump for the current change set, do not bump it again.
-- Documentation-only changes do not require a `VERSION` update unless explicitly requested by the project maintainer (for example via PR comment or issue).
-
-Versioning Checks:
-
-- **Pre-commit check:** Before committing, verify `VERSION` exists and matches the project's semantic versioning format (e.g., `MAJOR.MINOR.PATCH`).
-- **Missing or invalid `VERSION`:** If `VERSION` is missing or its format appears invalid, stop and prompt the author to correct it before committing. Include the expected format and a sample value in the prompt.
-
 ## Compatibility Requirements
 - Keep code compatible with Swift 5.9 and macOS 13 APIs.
 - Keep UI changes in SwiftUI and follow existing visual/component patterns.
