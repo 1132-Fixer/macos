@@ -38,6 +38,10 @@
 	<string>NSApplication</string>
 	<key>NSSupportsAutomaticGraphicsSwitching</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>1132 Fixer needs camera access so Zoom can use your camera when launched in sandbox mode.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>1132 Fixer needs microphone access so Zoom can use your microphone when launched in sandbox mode.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>1132 Fixer may need Bluetooth access to inspect Bluetooth-connected network interfaces.</string>
 	<key>NSAppleEventsUsageDescription</key>

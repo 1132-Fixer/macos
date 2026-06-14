@@ -2,6 +2,7 @@ import SwiftUI
 import Foundation
 import AppKit
 import UniformTypeIdentifiers
+import AVFoundation
 
 @MainActor
 final class AppViewModel: ObservableObject {
@@ -76,6 +77,7 @@ final class AppViewModel: ObservableObject {
         case clearingState
         case flushingDNS
         case stoppingUpdaters
+        case checkingMediaAccess
         case launchingZoom
         case completed
         case failed(String)
@@ -142,6 +144,7 @@ final class AppViewModel: ObservableObject {
             ("resetData", "Clear Local State"),
             ("dns", "DNS Flush"),
             ("updaters", "Stop Updaters"),
+            ("mediaAccess", "Camera & Mic"),
             ("launch", "Launch Zoom"),
         ])
         runTask("Start Zoom") {
@@ -267,7 +270,25 @@ final class AppViewModel: ObservableObject {
                 self.appendLog("Warning: \(error.localizedDescription)")
             }
 
-            // 7. Launch Zoom
+            // 7. Ensure camera and microphone access before the sandboxed launch.
+            // Zoom runs under sandbox-exec, so macOS attributes Zoom's camera/mic
+            // TCC requests to this app (the launcher). This app must therefore hold
+            // the grants for Zoom to see the camera/mic. Denial is non-fatal: Zoom
+            // still launches so the 1132 fix proceeds; only A/V is affected.
+            self.workflowState = .checkingMediaAccess
+            self.markStepRunning("mediaAccess")
+            self.appendLog("Step: Check camera and microphone access")
+            do {
+                let detail = try await self.ensureMediaAccessForSandboxedZoom()
+                self.markStepDone("mediaAccess", succeeded: true)
+                results.append(.init(id: "mediaAccess", name: "Camera & Mic", succeeded: true, detail: detail))
+            } catch {
+                self.markStepDone("mediaAccess", succeeded: false)
+                results.append(.init(id: "mediaAccess", name: "Camera & Mic", succeeded: false, detail: error.localizedDescription))
+                self.appendLog("Warning: \(error.localizedDescription)")
+            }
+
+            // 8. Launch Zoom
             self.workflowState = .launchingZoom
             self.markStepRunning("launch")
             self.appendLog("Step: Launch Zoom")
@@ -842,6 +863,48 @@ If your network connection is disrupted after this step:
 
     private func makeLaunchZoomCommand() -> String {
         ShellCommands.makeLaunchZoomCommand()
+    }
+
+    private func ensureMediaAccessForSandboxedZoom() async throws -> String {
+        let cameraStatus = try await ensureMediaAccess(
+            mediaType: .video,
+            displayName: "Camera",
+            usageDescriptionKey: "NSCameraUsageDescription"
+        )
+        let microphoneStatus = try await ensureMediaAccess(
+            mediaType: .audio,
+            displayName: "Microphone",
+            usageDescriptionKey: "NSMicrophoneUsageDescription"
+        )
+
+        return "\(cameraStatus); \(microphoneStatus)"
+    }
+
+    private func ensureMediaAccess(
+        mediaType: AVMediaType,
+        displayName: String,
+        usageDescriptionKey: String
+    ) async throws -> String {
+        guard Bundle.main.object(forInfoDictionaryKey: usageDescriptionKey) != nil else {
+            throw appError("\(displayName) access cannot be requested because \(usageDescriptionKey) is missing from the app bundle.")
+        }
+
+        switch AVCaptureDevice.authorizationStatus(for: mediaType) {
+        case .authorized:
+            return "\(displayName) access already granted"
+        case .notDetermined:
+            let granted = await AVCaptureDevice.requestAccess(for: mediaType)
+            if granted {
+                return "\(displayName) access granted"
+            }
+            throw appError("\(displayName) access was denied. Enable 1132 Fixer in System Settings > Privacy & Security > \(displayName), then run Start Zoom again.")
+        case .denied:
+            throw appError("\(displayName) access is denied. Enable 1132 Fixer in System Settings > Privacy & Security > \(displayName), then run Start Zoom again.")
+        case .restricted:
+            throw appError("\(displayName) access is restricted by macOS or device management policy.")
+        @unknown default:
+            throw appError("\(displayName) access is in an unknown authorization state.")
+        }
     }
 
     private func appError(_ message: String) -> NSError {
