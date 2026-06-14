@@ -4,7 +4,8 @@ set -euo pipefail
 APP_NAME="1132 Fixer"
 EXECUTABLE_NAME="1132 Fixer"
 TARGET_NAME="1132Fixer"
-BUNDLE_ID="com.local.1132fixer"
+# Must match CFBundleIdentifier in Sources/1132Fixer/Info.plist. Overridable via env.
+BUNDLE_ID="${BUNDLE_ID:-com.1132fixer.1132-Fixer}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION_FILE="$ROOT_DIR/VERSION"
@@ -274,7 +275,7 @@ if [[ ! -f "$ENTITLEMENTS_FILE" ]]; then
 fi
 
 echo "==> Signing app bundle ($SIGN_IDENTITY)"
-codesign --force --deep --options runtime --timestamp --entitlements "$ENTITLEMENTS_FILE" --sign "${SIGN_IDENTITY_HASH:-$SIGN_IDENTITY}" "${codesign_args[@]}" "$APP_BUNDLE_DIR"
+codesign --force --deep --options runtime --timestamp --identifier "$BUNDLE_ID" --entitlements "$ENTITLEMENTS_FILE" --sign "${SIGN_IDENTITY_HASH:-$SIGN_IDENTITY}" "${codesign_args[@]}" "$APP_BUNDLE_DIR"
 codesign --verify --strict --verbose=2 "$APP_BUNDLE_DIR"
 echo "==> Entitlements embedded in signature:"
 codesign -d --entitlements :- "$APP_BUNDLE_DIR" 2>/dev/null | grep -iE 'camera|audio-input|apple-events' || echo "WARNING: camera/mic entitlements not found after signing"
