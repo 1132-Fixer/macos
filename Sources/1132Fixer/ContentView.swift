@@ -2,6 +2,7 @@ import SwiftUI
 import Foundation
 import AppKit
 import UniformTypeIdentifiers
+import AVFoundation
 
 @MainActor
 final class AppViewModel: ObservableObject {
@@ -27,6 +28,7 @@ final class AppViewModel: ObservableObject {
     private struct MACSpoofResult {
         let summary: String
         let hasWarning: Bool
+        let wasSkipped: Bool
     }
 
     private enum Constants {
@@ -70,10 +72,12 @@ final class AppViewModel: ObservableObject {
         case preflight
         case closingZoom
         case spoofingMAC
+        case checkingNetwork
         case backingUpState
         case clearingState
         case flushingDNS
         case stoppingUpdaters
+        case checkingMediaAccess
         case launchingZoom
         case completed
         case failed(String)
@@ -127,7 +131,6 @@ final class AppViewModel: ObservableObject {
     private var runningTask: Task<Void, Never>?
     private var currentProcess: Process?
     private let stopZoomCommand = ShellCommands.stopZoom
-    private let resetZoomDataCommand = ShellCommands.resetZoomData
     private let stopZoomUpdatersCommand = ShellCommands.stopZoomUpdaters
     private let refreshDNSAppleScript = ShellCommands.refreshDNSAppleScript
     private let zoomBinaryPath = ShellCommands.zoomBinaryPath
@@ -136,11 +139,12 @@ final class AppViewModel: ObservableObject {
         lastRunResults = nil
         initProgress(steps: [
             ("closeZoom", "Close Zoom"),
-            ("macSpoof", "MAC Spoof & Network"),
+            ("network", ShellCommands.isMacSpoofingDisabledForCurrentOS() ? "Network Check" : "MAC Spoof & Network"),
             ("backup", "Backup State"),
             ("resetData", "Clear Local State"),
             ("dns", "DNS Flush"),
             ("updaters", "Stop Updaters"),
+            ("mediaAccess", "Camera & Mic"),
             ("launch", "Launch Zoom"),
         ])
         runTask("Start Zoom") {
@@ -164,19 +168,30 @@ final class AppViewModel: ObservableObject {
                 self.appendLog("Warning: \(error.localizedDescription)")
             }
 
-            // 2. Spoof MAC
-            self.workflowState = .spoofingMAC
-            self.markStepRunning("macSpoof")
-            self.appendLog("Step: Spoof MAC and reconnect active network (admin prompt expected)")
+            // 2. Network handling
+            self.workflowState = ShellCommands.isMacSpoofingDisabledForCurrentOS() ? .checkingNetwork : .spoofingMAC
+            self.markStepRunning("network")
+            self.appendLog(ShellCommands.isMacSpoofingDisabledForCurrentOS()
+                ? "Step: Check active network; MAC spoofing is disabled on macOS 14+"
+                : "Step: Spoof MAC and reconnect active network (admin prompt expected)")
             let macSpoofResult: MACSpoofResult
             do {
                 macSpoofResult = try await self.spoofMACAndReconnectActiveInterface()
-                self.markStepDone("macSpoof", succeeded: !macSpoofResult.hasWarning)
-                results.append(.init(id: "macSpoof", name: "MAC Spoof & Network", succeeded: !macSpoofResult.hasWarning, detail: macSpoofResult.summary))
+                if macSpoofResult.wasSkipped {
+                    self.markStepSkipped("network")
+                } else {
+                    self.markStepDone("network", succeeded: !macSpoofResult.hasWarning)
+                }
+                results.append(.init(
+                    id: "network",
+                    name: ShellCommands.isMacSpoofingDisabledForCurrentOS() ? "Network Check" : "MAC Spoof & Network",
+                    succeeded: !macSpoofResult.hasWarning,
+                    detail: macSpoofResult.summary
+                ))
             } catch {
-                macSpoofResult = MACSpoofResult(summary: "MAC spoofing skipped: \(error.localizedDescription)", hasWarning: true)
-                self.markStepDone("macSpoof", succeeded: false)
-                results.append(.init(id: "macSpoof", name: "MAC Spoof & Network", succeeded: false, detail: error.localizedDescription))
+                macSpoofResult = MACSpoofResult(summary: "Network step skipped: \(error.localizedDescription)", hasWarning: true, wasSkipped: true)
+                self.markStepDone("network", succeeded: false)
+                results.append(.init(id: "network", name: "Network Check", succeeded: false, detail: error.localizedDescription))
             }
 
             // 3. Backup Zoom state
@@ -204,10 +219,12 @@ final class AppViewModel: ObservableObject {
             self.markStepRunning("resetData")
             self.appendLog("Step: Reset Zoom data")
             do {
+                let resetCommand = ShellCommands.makeResetZoomDataCommand(homeDirectory: NSHomeDirectory())
+                let resetScript = ShellCommands.appleScriptDoShellScript(resetCommand, administratorPrivileges: true)
                 let output = try await self.runProcess(
                     stepName: "Reset Zoom data",
-                    executable: Constants.bashPath,
-                    arguments: ["-c", self.resetZoomDataCommand]
+                    executable: Constants.osascriptPath,
+                    arguments: ["-e", resetScript]
                 )
                 self.markStepDone("resetData", succeeded: true)
                 results.append(.init(id: "resetData", name: "Clear Local State", succeeded: true, detail: output.isEmpty ? nil : output))
@@ -253,7 +270,25 @@ final class AppViewModel: ObservableObject {
                 self.appendLog("Warning: \(error.localizedDescription)")
             }
 
-            // 7. Launch Zoom
+            // 7. Ensure camera and microphone access before the sandboxed launch.
+            // Zoom runs under sandbox-exec, so macOS attributes Zoom's camera/mic
+            // TCC requests to this app (the launcher). This app must therefore hold
+            // the grants for Zoom to see the camera/mic. Denial is non-fatal: Zoom
+            // still launches so the 1132 fix proceeds; only A/V is affected.
+            self.workflowState = .checkingMediaAccess
+            self.markStepRunning("mediaAccess")
+            self.appendLog("Step: Check camera and microphone access")
+            do {
+                let detail = try await self.ensureMediaAccessForSandboxedZoom()
+                self.markStepDone("mediaAccess", succeeded: true)
+                results.append(.init(id: "mediaAccess", name: "Camera & Mic", succeeded: true, detail: detail))
+            } catch {
+                self.markStepDone("mediaAccess", succeeded: false)
+                results.append(.init(id: "mediaAccess", name: "Camera & Mic", succeeded: false, detail: error.localizedDescription))
+                self.appendLog("Warning: \(error.localizedDescription)")
+            }
+
+            // 8. Launch Zoom
             self.workflowState = .launchingZoom
             self.markStepRunning("launch")
             self.appendLog("Step: Launch Zoom")
@@ -311,6 +346,13 @@ final class AppViewModel: ObservableObject {
         workflowProgress = progress
     }
 
+    private func markStepSkipped(_ id: String) {
+        guard var progress = workflowProgress,
+              let idx = progress.steps.firstIndex(where: { $0.id == id }) else { return }
+        progress.steps[idx].state = .skipped
+        workflowProgress = progress
+    }
+
     func cancelWorkflow() {
         runningTask?.cancel()
         currentProcess?.terminate()
@@ -364,7 +406,9 @@ final class AppViewModel: ObservableObject {
 
                 if let kind = try? ShellCommands.classifySupportedInterface(hardwarePortName: portName) {
                     results.append("Interface type: \(kind.rawValue)")
-                    if kind == .wifi && ShellCommands.isMacSpoofingBlockedOnWiFi() {
+                    if ShellCommands.isMacSpoofingDisabledForCurrentOS() {
+                        results.append("MAC spoofing: Disabled on macOS 14+")
+                    } else if kind == .wifi && ShellCommands.isMacSpoofingBlockedOnWiFi() {
                         results.append("MAC spoofing: BLOCKED (Apple Silicon + macOS 14+)")
                     } else {
                         results.append("MAC spoofing: Available")
@@ -431,11 +475,13 @@ final class AppViewModel: ObservableObject {
                 }
             }
 
-            // Admin prompts expected (MAC spoofing + DNS flush both need admin)
+            // Admin prompts expected (DNS flush needs admin; MAC spoofing on supported macOS also needs admin)
             checks.append(.init(id: "admin", label: "Admin Prompts", value: "Expected", isWarning: false))
 
             // MAC spoofing availability
-            if ShellCommands.isMacSpoofingBlockedOnWiFi() {
+            if ShellCommands.isMacSpoofingDisabledForCurrentOS() {
+                checks.append(.init(id: "macspoof", label: "MAC Spoofing", value: "Disabled on macOS 14+", isWarning: false))
+            } else if ShellCommands.isMacSpoofingBlockedOnWiFi() {
                 checks.append(.init(id: "macspoof", label: "MAC Spoofing", value: "Blocked on Wi-Fi (Apple Silicon + macOS 14+)", isWarning: true))
             }
 
@@ -507,6 +553,8 @@ Last action status: \(lastStatus)
         lines.append("OS: \(osVersion)")
         lines.append("Architecture: \(arch)")
         lines.append("Last action status: \(lastStatus)")
+        lines.append("")
+        lines.append(contentsOf: DiagnosticsCollector.makeSnapshot())
         lines.append("")
 
         if let results = lastRunResults {
@@ -601,6 +649,14 @@ Last action status: \(lastStatus)
     private func spoofMACAndReconnectActiveInterface() async throws -> MACSpoofResult {
         let interface = try await resolveActiveSupportedInterface()
 
+        if ShellCommands.isMacSpoofingDisabledForCurrentOS() {
+            return MACSpoofResult(
+                summary: "MAC spoofing is disabled on macOS 14 and later because the old spoofing method no longer works reliably. Active network: \(interface.kind.rawValue) (\(interface.device), service: \(interface.networkService)).",
+                hasWarning: false,
+                wasSkipped: true
+            )
+        }
+
         if interface.kind == .wifi && ShellCommands.isMacSpoofingBlockedOnWiFi() {
             return try await resetPrivateWiFiAddressAndReconnect(networkService: interface.networkService, device: interface.device)
         }
@@ -676,18 +732,20 @@ If your network connection is disrupted after this step:
 
         return MACSpoofResult(
             summary: combinedSummary,
-            hasWarning: combinedSummary.contains("Warning:")
+            hasWarning: combinedSummary.contains("Warning:"),
+            wasSkipped: false
         )
     }
 
     private func resetPrivateWiFiAddressAndReconnect(networkService: String, device: String) async throws -> MACSpoofResult {
         // 1. Check current private address mode
         let getModeCmd = ShellCommands.makeGetPrivateAddressModeCommand(networkService: networkService)
-        let currentMode = (try? await runProcess(
+        let currentModeOutput = (try? await runProcess(
             stepName: "Check Private Wi-Fi Address mode",
             executable: Constants.bashPath,
             arguments: ["-c", getModeCmd]
-        ))?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? "unsupported"
+        )) ?? "unsupported"
+        let currentMode = ShellCommands.normalizePrivateAddressModeOutput(currentModeOutput)
 
         appendLog("Private Wi-Fi Address mode: \(currentMode)")
 
@@ -699,7 +757,7 @@ If your network connection is disrupted after this step:
             warnings.append("Warning: Private Wi-Fi Address controls are unsupported on this macOS/networksetup version.")
         } else if currentMode != "rotating" {
             let setModeCmd = ShellCommands.makeSetPrivateAddressModeCommand(networkService: networkService, mode: "rotating")
-            let setModeScript = ShellCommands.appleScriptDoShellScript(setModeCmd, administratorPrivileges: false)
+            let setModeScript = ShellCommands.appleScriptDoShellScript(setModeCmd, administratorPrivileges: true)
             do {
                 _ = try await runProcess(
                     stepName: "Enable rotating Private Wi-Fi Address",
@@ -718,7 +776,7 @@ If your network connection is disrupted after this step:
 
         // 3. Cycle the interface to generate a new MAC — always brings it back up
         let resetCmd = ShellCommands.makeRotatingMACResetCommand(device: device)
-        let resetScript = ShellCommands.appleScriptDoShellScript(resetCmd, administratorPrivileges: false)
+        let resetScript = ShellCommands.appleScriptDoShellScript(resetCmd, administratorPrivileges: true)
         do {
             _ = try await runProcess(
                 stepName: "Reset Wi-Fi to generate new rotating MAC",
@@ -757,7 +815,8 @@ If your network connection is disrupted after this step:
 
         return MACSpoofResult(
             summary: summaryParts.joined(separator: "\n"),
-            hasWarning: !warnings.isEmpty
+            hasWarning: !warnings.isEmpty,
+            wasSkipped: false
         )
     }
 
@@ -804,6 +863,48 @@ If your network connection is disrupted after this step:
 
     private func makeLaunchZoomCommand() -> String {
         ShellCommands.makeLaunchZoomCommand()
+    }
+
+    private func ensureMediaAccessForSandboxedZoom() async throws -> String {
+        let cameraStatus = try await ensureMediaAccess(
+            mediaType: .video,
+            displayName: "Camera",
+            usageDescriptionKey: "NSCameraUsageDescription"
+        )
+        let microphoneStatus = try await ensureMediaAccess(
+            mediaType: .audio,
+            displayName: "Microphone",
+            usageDescriptionKey: "NSMicrophoneUsageDescription"
+        )
+
+        return "\(cameraStatus); \(microphoneStatus)"
+    }
+
+    private func ensureMediaAccess(
+        mediaType: AVMediaType,
+        displayName: String,
+        usageDescriptionKey: String
+    ) async throws -> String {
+        guard Bundle.main.object(forInfoDictionaryKey: usageDescriptionKey) != nil else {
+            throw appError("\(displayName) access cannot be requested because \(usageDescriptionKey) is missing from the app bundle.")
+        }
+
+        switch AVCaptureDevice.authorizationStatus(for: mediaType) {
+        case .authorized:
+            return "\(displayName) access already granted"
+        case .notDetermined:
+            let granted = await AVCaptureDevice.requestAccess(for: mediaType)
+            if granted {
+                return "\(displayName) access granted"
+            }
+            throw appError("\(displayName) access was denied. Enable 1132 Fixer in System Settings > Privacy & Security > \(displayName), then run Start Zoom again.")
+        case .denied:
+            throw appError("\(displayName) access is denied. Enable 1132 Fixer in System Settings > Privacy & Security > \(displayName), then run Start Zoom again.")
+        case .restricted:
+            throw appError("\(displayName) access is restricted by macOS or device management policy.")
+        @unknown default:
+            throw appError("\(displayName) access is in an unknown authorization state.")
+        }
     }
 
     private func appError(_ message: String) -> NSError {
@@ -970,7 +1071,7 @@ struct ContentView: View {
                 HStack(spacing: 14) {
                     ActionCard(
                         title: "Start Zoom",
-                        subtitle: "Spoofs MAC on active Wi-Fi/Ethernet and reconnects it, then resets Zoom data, refreshes DNS cache, and launches Zoom.",
+                        subtitle: "Checks the active network, resets Zoom data, refreshes DNS cache, and launches Zoom in sandbox mode.",
                         systemImage: "video.circle.fill",
                         tint: Color(red: 0.13, green: 0.50, blue: 0.86),
                         isDisabled: vm.isRunning,

@@ -136,6 +136,11 @@ struct ShellCommandsTests {
         #expect(kind == .ethernet)
     }
 
+    @Test func classifyUSBLANAsEthernet() throws {
+        let kind = try ShellCommands.classifySupportedInterface(hardwarePortName: "USB 10/100/1000 LAN")
+        #expect(kind == .ethernet)
+    }
+
     @Test func classifyUnsupported() {
         #expect(throws: (any Error).self) {
             try ShellCommands.classifySupportedInterface(hardwarePortName: "Bluetooth PAN")
@@ -200,6 +205,69 @@ struct ShellCommandsTests {
         #expect(cmd.contains("ifconfig"))
         #expect(cmd.contains("'en0'"))
         #expect(cmd.contains("ether"))
+    }
+
+    @Test func normalizePrivateAddressModeOutput() {
+        #expect(ShellCommands.normalizePrivateAddressModeOutput("Rotating\n") == "rotating")
+        #expect(ShellCommands.normalizePrivateAddressModeOutput("** Error: The command is not recognized.") == "unsupported")
+        #expect(ShellCommands.normalizePrivateAddressModeOutput("networksetup -listnetworkserviceorder\nnetworksetup -printcommands") == "unsupported")
+    }
+
+    @Test func makeResetZoomDataCommandUsesProvidedHome() {
+        let cmd = ShellCommands.makeResetZoomDataCommand(homeDirectory: "/Users/test user")
+        #expect(cmd.contains("home='/Users/test user'"))
+        #expect(cmd.contains("Application Support/zoom.us"))
+        #expect(cmd.contains("exit \"$remaining\""))
+    }
+
+    @Test func zoomSandboxProfileAllowsCameraAndMicrophone() {
+        #expect(ShellCommands.zoomSandboxProfile.contains("(allow device-camera)"))
+        #expect(ShellCommands.zoomSandboxProfile.contains("(allow device-microphone)"))
+        #expect(ShellCommands.zoomSandboxProfile.contains("(allow iokit-get-properties)"))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""AppleH13CamInUserClient""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""AppleUSBHostFrameworkInterfaceClient""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""IOUSBInterfaceUserClientV3""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.cmio.VDCAssistant""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.tccd""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.tccd.system""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.applecamerad""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.appleh13camerad""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.appleh16camerad""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.cmio.AVCAssistant""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.cmio.IIDCVideoAssistant""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.cmio.iOSScreenCaptureAssistant""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.cmio.registerassistantservice.system-extensions""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.cmio.system-extensions""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.coremedia.endpoint.xpc""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.mediaexperience.endpoint.xpc""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.runningboard""#))
+        #expect(ShellCommands.zoomSandboxProfile.contains(#""com.apple.videoconference.camera""#))
+    }
+
+    @Test func stopZoomCommandsClearCaptureHelpers() {
+        #expect(ShellCommands.stopZoom.contains(#""caphost""#))
+        #expect(ShellCommands.stopZoom.contains(#""CptHost""#))
+
+        let cmd = ShellCommands.makeLaunchZoomCommand(zoomBinaryExists: true)
+        #expect(cmd.contains(#""caphost""#))
+        #expect(cmd.contains(#""CptHost""#))
+    }
+
+    @Test func makeLaunchZoomCommandUsesPersistentSandboxOnly() {
+        let cmd = ShellCommands.makeLaunchZoomCommand(zoomBinaryExists: true)
+        #expect(cmd.contains("Launch mode: persistentSandbox"))
+        #expect(cmd.contains("/usr/bin/sandbox-exec"))
+        #expect(!cmd.contains(#"/usr/bin/open -a "zoom.us""#))
+        #expect(!cmd.contains("launch_normal_zoom"))
+        #expect(!cmd.contains("normalOpen"))
+    }
+
+    @Test func makeLaunchZoomCommandFailsWhenZoomBinaryIsMissing() {
+        let cmd = ShellCommands.makeLaunchZoomCommand(zoomBinaryExists: false)
+        #expect(cmd.contains("Launch mode: sandboxRequiredMissingBinary"))
+        #expect(cmd.contains("Zoom must be launched in sandbox mode"))
+        #expect(!cmd.contains(#"/usr/bin/open -a "zoom.us""#))
+        #expect(!cmd.contains("/usr/bin/sandbox-exec"))
     }
 
     // MARK: - Machine Architecture

@@ -4,7 +4,8 @@ set -euo pipefail
 APP_NAME="1132 Fixer"
 EXECUTABLE_NAME="1132 Fixer"
 TARGET_NAME="1132Fixer"
-BUNDLE_ID="com.local.1132fixer"
+# Must match CFBundleIdentifier in Sources/1132Fixer/Info.plist. Overridable via env.
+BUNDLE_ID="${BUNDLE_ID:-com.1132fixer.1132-Fixer}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION_FILE="$ROOT_DIR/VERSION"
@@ -13,6 +14,7 @@ MIN_MACOS_FILE="$ROOT_DIR/MIN_MACOS_VERSION"
 BUG_REPORT_ENDPOINT_RESOURCE_FILE="$ROOT_DIR/Sources/1132Fixer/Resources/FIXER_BUG_REPORT_ENDPOINT"
 BUG_REPORT_TOKEN_RESOURCE_FILE="$ROOT_DIR/Sources/1132Fixer/Resources/FIXER_BUG_REPORT_TOKEN"
 DIST_DIR="$ROOT_DIR/dist"
+ENTITLEMENTS_FILE="$ROOT_DIR/Sources/1132Fixer/1132Fixer.entitlements"
 TEMP_BUILD_ROOT="$ROOT_DIR/.build/universal"
 ARM64_BUILD_DIR="$TEMP_BUILD_ROOT/arm64"
 X64_BUILD_DIR="$TEMP_BUILD_ROOT/x86_64"
@@ -267,9 +269,16 @@ if [[ -f "$SOURCE_APP_ICON" ]]; then
   iconutil -c icns "$ICONSET_DIR" -o "$APP_BUNDLE_DIR/Contents/Resources/AppIcon.icns"
 fi
 
+if [[ ! -f "$ENTITLEMENTS_FILE" ]]; then
+  echo "Missing entitlements file: $ENTITLEMENTS_FILE" >&2
+  exit 1
+fi
+
 echo "==> Signing app bundle ($SIGN_IDENTITY)"
-codesign --force --deep --options runtime --timestamp --sign "${SIGN_IDENTITY_HASH:-$SIGN_IDENTITY}" "${codesign_args[@]}" "$APP_BUNDLE_DIR"
+codesign --force --deep --options runtime --timestamp --identifier "$BUNDLE_ID" --entitlements "$ENTITLEMENTS_FILE" --sign "${SIGN_IDENTITY_HASH:-$SIGN_IDENTITY}" "${codesign_args[@]}" "$APP_BUNDLE_DIR"
 codesign --verify --strict --verbose=2 "$APP_BUNDLE_DIR"
+echo "==> Entitlements embedded in signature:"
+codesign -d --entitlements :- "$APP_BUNDLE_DIR" 2>/dev/null | grep -iE 'camera|audio-input|apple-events' || echo "WARNING: camera/mic entitlements not found after signing"
 
 echo "==> Creating DMG"
 rm -f "$DMG_PATH"

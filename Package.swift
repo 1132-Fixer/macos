@@ -14,7 +14,8 @@ let package = Package(
             name: "1132Fixer",
             path: "Sources/1132Fixer",
             exclude: [
-                "Info.plist"
+                "Info.plist",
+                "1132Fixer.entitlements"
             ],
             resources: [
                 .process("Resources")

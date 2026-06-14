@@ -22,21 +22,26 @@ enum ShellCommands {
     // MARK: - Command Strings
 
     static let stopZoom = #"""
-    if /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1; then
-      /usr/bin/killall "zoom.us" 2>/dev/null || true
+    zoom_processes="zoom.us caphost CptHost"
+    if /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1 || /usr/bin/pgrep -x "caphost" >/dev/null 2>&1 || /usr/bin/pgrep -x "CptHost" >/dev/null 2>&1; then
+      for proc in $zoom_processes; do
+        /usr/bin/killall "$proc" 2>/dev/null || true
+      done
       echo "Zoom was running and has been closed."
       for i in {1..10}; do
-        /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1 || break
+        if ! /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1 && ! /usr/bin/pgrep -x "caphost" >/dev/null 2>&1 && ! /usr/bin/pgrep -x "CptHost" >/dev/null 2>&1; then
+          break
+        fi
         /bin/sleep 0.5
       done
-      if /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1; then
-        /usr/bin/killall -9 "zoom.us" 2>/dev/null || true
+      if /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1 || /usr/bin/pgrep -x "caphost" >/dev/null 2>&1 || /usr/bin/pgrep -x "CptHost" >/dev/null 2>&1; then
+        for proc in $zoom_processes; do
+          /usr/bin/killall -9 "$proc" 2>/dev/null || true
+        done
         /bin/sleep 1
       fi
     fi
     """#
-
-    static let resetZoomData = #"rm -rf "$HOME/Library/Application Support/zoom.us" "$HOME/Library/Caches/us.zoom.xos" "$HOME/Library/Preferences/us.zoom.xos.plist" "$HOME/Library/Logs/zoom.us.log"* "$HOME/Library/Saved Application State/us.zoom.xos.savedState"; defaults delete us.zoom.xos 2>/dev/null || true"#
 
     static let stopZoomUpdaters = #"""
     for proc in zAutoUpdate zPTUpdaterUI ZoomUpdater; do
@@ -53,6 +58,37 @@ enum ShellCommands {
     """#
 
     static let refreshDNSAppleScript = #"do shell script "/usr/bin/dscacheutil -flushcache; /usr/bin/killall -HUP mDNSResponder" with administrator privileges"#
+
+    static func makeResetZoomDataCommand(homeDirectory: String) -> String {
+        let home = shellSingleQuote(homeDirectory)
+        return """
+        home=\(home)
+        zoom_data="$home/Library/Application Support/zoom.us"
+        zoom_cache="$home/Library/Caches/us.zoom.xos"
+        zoom_prefs="$home/Library/Preferences/us.zoom.xos.plist"
+        zoom_logs="$home/Library/Logs/zoom.us.log"
+        zoom_saved_state="$home/Library/Saved Application State/us.zoom.xos.savedState"
+
+        /bin/rm -rf "$zoom_data" "$zoom_cache" "$zoom_prefs" "$zoom_saved_state"
+        /bin/rm -f "$zoom_logs"*
+        HOME="$home" /usr/bin/defaults delete us.zoom.xos >/dev/null 2>&1 || true
+
+        remaining=0
+        for path in "$zoom_data" "$zoom_cache" "$zoom_prefs" "$zoom_saved_state"; do
+          if [ -e "$path" ]; then
+            echo "Warning: Could not remove $path" >&2
+            remaining=1
+          fi
+        done
+
+        if /bin/ls "$zoom_logs"* >/dev/null 2>&1; then
+          echo "Warning: Could not remove Zoom log files matching $zoom_logs*" >&2
+          remaining=1
+        fi
+
+        exit "$remaining"
+        """
+    }
 
     static func makeBackupZoomDataCommand() -> String {
         let timestamp = ISO8601DateFormatter().string(from: Date())
@@ -175,6 +211,9 @@ Turn off your VPN, wait a few seconds for your normal connection to restore, and
         if normalized.contains("ethernet") {
             return .ethernet
         }
+        if normalized.contains("usb") && normalized.contains("lan") {
+            return .ethernet
+        }
 
         throw NSError(domain: "1132Fixer", code: 1, userInfo: [NSLocalizedDescriptionKey: "Detect active network interface: Active interface '\(hardwarePortName)' is not supported. Only Wi-Fi and Ethernet are supported."])
     }
@@ -237,6 +276,10 @@ Turn off your VPN, wait a few seconds for your normal connection to restore, and
         return isAppleSilicon && isMacOS14OrLater
     }
 
+    static func isMacSpoofingDisabledForCurrentOS() -> Bool {
+        ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 14
+    }
+
     // MARK: - Private Wi-Fi Address (Rotating MAC)
 
     static func makeGetPrivateAddressModeCommand(networkService: String) -> String {
@@ -245,6 +288,34 @@ Turn off your VPN, wait a few seconds for your normal connection to restore, and
 
     static func makeSetPrivateAddressModeCommand(networkService: String, mode: String) -> String {
         "/usr/sbin/networksetup -setPrivateNetworkAddress \(shellSingleQuote(networkService)) \(shellSingleQuote(mode))"
+    }
+
+    static func normalizePrivateAddressModeOutput(_ output: String) -> String {
+        let normalizedLines = output
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+
+        for mode in ["rotating", "fixed", "static", "off"] {
+            if normalizedLines.contains(mode) {
+                return mode
+            }
+        }
+
+        let normalizedOutput = normalizedLines.joined(separator: "\n")
+        if normalizedOutput.contains("not recognized")
+            || normalizedOutput.contains("unsupported")
+            || normalizedOutput.contains("networksetup -printcommands") {
+            return "unsupported"
+        }
+
+        for mode in ["rotating", "fixed", "static", "off"] {
+            if normalizedOutput.contains(mode) {
+                return mode
+            }
+        }
+
+        return normalizedOutput.isEmpty ? "unsupported" : normalizedOutput
     }
 
     /// Cycles the Wi-Fi interface off then on to generate a new rotating MAC address.
@@ -281,31 +352,89 @@ Turn off your VPN, wait a few seconds for your normal connection to restore, and
 
     // MARK: - Launch Zoom
 
+    // Zoom must stay inside sandbox-exec for this app. Do not replace this
+    // profile-backed launch with /usr/bin/open or any other normal Zoom launch.
+    static let zoomSandboxProfile = """
+    (version 1)
+    (allow default)
+
+    ; Camera and microphone access must remain explicit because Zoom runs under
+    ; sandbox-exec for the full session, including helper-based video capture.
+    (allow device-camera)
+    (allow device-microphone)
+    (allow iokit-get-properties)
+    (allow iokit-open
+        (iokit-user-client-class "AppleAVE2UserClient")
+        (iokit-user-client-class "AppleH13CamInUserClient")
+        (iokit-user-client-class "AppleUSBHostFrameworkInterfaceClient")
+        (iokit-user-client-class "H11ANEInDirectPathClient")
+        (iokit-user-client-class "H1xANELoadBalancerClient")
+        (iokit-user-client-class "H1xANELoadBalancerDirectPathClient")
+        (iokit-user-client-class "IOSurfaceRootUserClient")
+        (iokit-user-client-class "IOUSBDeviceUserClientV2")
+        (iokit-user-client-class "IOUSBInterfaceUserClientV2")
+        (iokit-user-client-class "IOUSBInterfaceUserClientV3")
+        (iokit-user-client-class "IOUserUserClient")
+        (iokit-user-client-class "RootDomainUserClient")
+    )
+    (allow mach-lookup
+        (global-name "com.apple.SecurityServer")
+        (global-name "com.apple.applecamerad")
+        (global-name "com.apple.appleh13camerad")
+        (global-name "com.apple.appleh16camerad")
+        (global-name "com.apple.airplay.endpoint.xpc")
+        (global-name "com.apple.audio.AudioComponentRegistrar")
+        (global-name "com.apple.audio.AudioSession")
+        (global-name "com.apple.audio.audiohald")
+        (global-name "com.apple.audio.coreaudiod")
+        (global-name "com.apple.cmio.AVCAssistant")
+        (global-name "com.apple.cmio.VDCAssistant")
+        (global-name "com.apple.cmio.AppleCameraAssistant")
+        (global-name "com.apple.cmio.IIDCVideoAssistant")
+        (global-name "com.apple.cmio.iOSScreenCaptureAssistant")
+        (global-name "com.apple.cmio.registerassistantservice")
+        (global-name "com.apple.cmio.registerassistantservice.system-extensions")
+        (global-name "com.apple.cmio.system-extensions")
+        (global-name "com.apple.coreservices.launchservicesd")
+        (global-name "com.apple.coremedia.endpoint.xpc")
+        (global-name "com.apple.coremedia.virtualdisplaycg")
+        (global-name "com.apple.lsd.modifydb")
+        (global-name "com.apple.mediaexperience.endpoint.xpc")
+        (global-name "com.apple.pluginkit.pkd")
+        (global-name "com.apple.rtcreportingd")
+        (global-name "com.apple.runningboard")
+        (global-name "com.apple.securityd.xpc")
+        (global-name "com.apple.tccd")
+        (global-name "com.apple.tccd.system")
+        (global-name "com.apple.videoconference.camera")
+        (global-name "com.apple.windowserver.active")
+    )
+
+    (deny iokit-get-properties
+        (iokit-property "IOPlatformSerialNumber")
+        (iokit-property "IOPlatformUUID")
+        (iokit-property "board-id")
+        (iokit-property "IOMACAddress")
+    )
+    (deny file-read-data
+        (literal "/Library/Preferences/SystemConfiguration/NetworkInterfaces.plist")
+    )
+    """
+
     static func makeLaunchZoomCommand() -> String {
-        guard FileManager.default.fileExists(atPath: zoomBinaryPath) else {
+        makeLaunchZoomCommand(zoomBinaryExists: FileManager.default.fileExists(atPath: zoomBinaryPath))
+    }
+
+    static func makeLaunchZoomCommand(zoomBinaryExists: Bool) -> String {
+        guard zoomBinaryExists else {
             return #"""
-            echo "Launch mode: directOpenFallback (Zoom binary not found at expected path)"
-            echo "Warning: Zoom does not appear to be installed at /Applications/zoom.us.app. The sandbox bypass cannot run without the Zoom binary. Falling back to a normal open command."
-            /usr/bin/open -a "zoom.us" || { echo "Error: Could not open Zoom. Please install Zoom from https://zoom.us/download and try again."; exit 1; }
+            echo "Launch mode: sandboxRequiredMissingBinary"
+            echo "Error: Zoom must be launched in sandbox mode, but the Zoom binary was not found at /Applications/zoom.us.app/Contents/MacOS/zoom.us. Install Zoom from https://zoom.us/download and try again."
+            exit 1
             """#
         }
 
-        let profile = """
-        (version 1)
-        (allow default)
-        (allow device-camera)
-        (allow device-microphone)
-        (deny iokit-get-properties
-            (iokit-property "IOPlatformSerialNumber")
-            (iokit-property "IOPlatformUUID")
-            (iokit-property "board-id")
-            (iokit-property "IOMACAddress")
-        )
-        (deny file-read-data
-            (literal "/Library/Preferences/SystemConfiguration/NetworkInterfaces.plist")
-        )
-        """
-        let encodedProfile = Data(profile.utf8).base64EncodedString()
+        let encodedProfile = Data(zoomSandboxProfile.utf8).base64EncodedString()
         return """
         /bin/bash -c '
         set -u
@@ -318,35 +447,7 @@ Turn off your VPN, wait a few seconds for your normal connection to restore, and
           /bin/rm -f "$profile_path"
         }
 
-        wait_for_pid_runtime() {
-          pid="$1"
-          seconds="$2"
-          i=0
-          while [ "$i" -lt "$seconds" ]; do
-            if ! /bin/kill -0 "$pid" 2>/dev/null; then
-              return 1
-            fi
-            /bin/sleep 1
-            i=$((i + 1))
-          done
-          return 0
-        }
-
-        wait_for_pid_exit() {
-          pid="$1"
-          attempts="$2"
-          i=0
-          while [ "$i" -lt "$attempts" ]; do
-            if ! /bin/kill -0 "$pid" 2>/dev/null; then
-              return 0
-            fi
-            /bin/sleep 1
-            i=$((i + 1))
-          done
-          return 1
-        }
-
-        wait_for_zoom_stability() {
+        wait_for_sandboxed_zoom_stability() {
           required_consecutive="$1"
           max_attempts="$2"
           i=0
@@ -367,87 +468,57 @@ Turn off your VPN, wait a few seconds for your normal connection to restore, and
         }
 
         stop_zoom_processes() {
-          if /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1; then
-            /usr/bin/killall "zoom.us" 2>/dev/null || true
+          zoom_processes="zoom.us caphost CptHost"
+          if /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1 || /usr/bin/pgrep -x "caphost" >/dev/null 2>&1 || /usr/bin/pgrep -x "CptHost" >/dev/null 2>&1; then
+            for proc in $zoom_processes; do
+              /usr/bin/killall "$proc" 2>/dev/null || true
+            done
             for i in {1..6}; do
-              /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1 || break
+              if ! /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1 && ! /usr/bin/pgrep -x "caphost" >/dev/null 2>&1 && ! /usr/bin/pgrep -x "CptHost" >/dev/null 2>&1; then
+                break
+              fi
               /bin/sleep 0.5
             done
-            if /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1; then
-              /usr/bin/killall -9 "zoom.us" 2>/dev/null || true
+            if /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1 || /usr/bin/pgrep -x "caphost" >/dev/null 2>&1 || /usr/bin/pgrep -x "CptHost" >/dev/null 2>&1; then
+              for proc in $zoom_processes; do
+                /usr/bin/killall -9 "$proc" 2>/dev/null || true
+              done
               /bin/sleep 1
             fi
           fi
         }
 
-        launch_persistent_sandbox() {
-          echo "Launch mode escalated: persistentSandbox"
-          /usr/bin/sandbox-exec -f "$profile_path" "$zoom_binary" >/dev/null 2>&1 &
-          persistent_pid=$!
-          /bin/sleep 2
-          if /bin/kill -0 "$persistent_pid" 2>/dev/null || /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1; then
-            echo "Heuristic: persistent sandbox launch detected"
-            return 0
-          fi
-          echo "Heuristic: persistent sandbox launch detected = no"
-          return 1
-        }
-
         trap cleanup EXIT
         /bin/echo "$encoded_profile" | /usr/bin/base64 --decode > "$profile_path" || exit 1
 
-        echo "Launch mode: bootstrapThenNormal"
+        # Sandbox mode is required for 1132 Fixer. Normal Zoom launch mode does
+        # not work for this workflow, so there is intentionally no open -a
+        # fallback here.
+        echo "Launch mode: persistentSandbox"
+        stop_zoom_processes
         /usr/bin/sandbox-exec -f "$profile_path" "$zoom_binary" >/dev/null 2>&1 &
-        bootstrap_pid=$!
+        sandbox_pid=$!
         /bin/sleep 1
 
-        if /bin/kill -0 "$bootstrap_pid" 2>/dev/null; then
-          echo "Heuristic: bootstrap started"
+        if /bin/kill -0 "$sandbox_pid" 2>/dev/null || /usr/bin/pgrep -x "zoom.us" >/dev/null 2>&1; then
+          echo "Heuristic: sandbox launch started"
         else
-          echo "Heuristic: bootstrap started = no"
-          echo "Heuristic: fallback triggered (bootstrap process missing)"
-          stop_zoom_processes
-          launch_persistent_sandbox || exit 1
+          echo "Heuristic: sandbox launch started = no"
+          exit 1
+        fi
+
+        if wait_for_sandboxed_zoom_stability 4 15; then
+          echo "Heuristic: sandbox launch stabilized"
           exit 0
         fi
 
-        if wait_for_pid_runtime "$bootstrap_pid" 11; then
-          echo "Heuristic: bootstrap survived minimum runtime"
-        else
-          echo "Heuristic: bootstrap survived minimum runtime = no"
-          echo "Heuristic: fallback triggered (bootstrap exited too quickly)"
-          stop_zoom_processes
-          launch_persistent_sandbox || exit 1
+        if /bin/kill -0 "$sandbox_pid" 2>/dev/null; then
+          echo "Heuristic: sandbox process still running without process-name stability confirmation"
           exit 0
         fi
 
-        /bin/kill "$bootstrap_pid" 2>/dev/null || true
-        if wait_for_pid_exit "$bootstrap_pid" 5; then
-          echo "Heuristic: bootstrap shutdown confirmed"
-        else
-          echo "Heuristic: bootstrap shutdown confirmed = no"
-        fi
-
-        /usr/bin/open -na "zoom.us"
-        if wait_for_zoom_stability 1 6; then
-          echo "Heuristic: normal relaunch detected"
-        else
-          echo "Heuristic: normal relaunch detected = no"
-          echo "Heuristic: fallback triggered (normal relaunch not detected)"
-          stop_zoom_processes
-          launch_persistent_sandbox || exit 1
-          exit 0
-        fi
-
-        if wait_for_zoom_stability 4 12; then
-          echo "Heuristic: normal relaunch stabilized"
-          exit 0
-        fi
-
-        echo "Heuristic: normal relaunch stabilized = no"
-        echo "Heuristic: fallback triggered (normal relaunch unstable)"
-        stop_zoom_processes
-        launch_persistent_sandbox || exit 1
+        echo "Heuristic: sandbox launch stabilized = no"
+        exit 1
         '
         """
     }
