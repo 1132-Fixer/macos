@@ -5,7 +5,9 @@ enum DiagnosticsCollector {
         let processInfo = ProcessInfo.processInfo
         let fileManager = FileManager.default
         let home = NSHomeDirectory()
-        let zoomAppPath = "/Applications/zoom.us.app"
+        let zoomAppPath = ZoomLocation.appPath
+        let zoomBinaryPath = ZoomLocation.binaryPath
+        let usingCustomZoomLocation = ZoomLocation.customAppPath != nil
         let zoomBundle = Bundle(path: zoomAppPath)
 
         var lines = [
@@ -19,8 +21,9 @@ enum DiagnosticsCollector {
             "Time zone: \(TimeZone.current.identifier)",
             "Sandbox launch required: yes",
             "sandbox-exec available: \(yesNo(fileManager.isExecutableFile(atPath: "/usr/bin/sandbox-exec")))",
+            "Zoom app path: \(zoomAppPath)\(usingCustomZoomLocation ? " (custom)" : " (default)")",
             "Zoom app installed: \(yesNo(fileManager.fileExists(atPath: zoomAppPath)))",
-            "Zoom binary executable: \(yesNo(fileManager.isExecutableFile(atPath: ShellCommands.zoomBinaryPath)))",
+            "Zoom binary executable: \(yesNo(fileManager.isExecutableFile(atPath: zoomBinaryPath)))",
             "Zoom version: \(zoomBundle?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown")",
             "Zoom build: \(zoomBundle?.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown")",
             "Zoom process running: \(yesNo(processIsRunning("zoom.us")))",

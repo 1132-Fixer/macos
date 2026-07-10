@@ -270,6 +270,31 @@ struct ShellCommandsTests {
         #expect(!cmd.contains("/usr/bin/sandbox-exec"))
     }
 
+    // MARK: - Custom Zoom Location
+
+    @Test func zoomBinaryPathIsDerivedFromAppBundlePath() {
+        #expect(ShellCommands.zoomBinaryPath(forAppPath: "/Applications/zoom.us.app")
+            == "/Applications/zoom.us.app/Contents/MacOS/zoom.us")
+        #expect(ShellCommands.zoomBinaryPath(forAppPath: "/Users/me/Apps/zoom.us.app")
+            == "/Users/me/Apps/zoom.us.app/Contents/MacOS/zoom.us")
+    }
+
+    @Test func makeLaunchZoomCommandUsesCustomBinaryPath() {
+        let customBinary = "/Users/me/Apps/zoom.us.app/Contents/MacOS/zoom.us"
+        let cmd = ShellCommands.makeLaunchZoomCommand(zoomBinaryPath: customBinary, zoomBinaryExists: true)
+        #expect(cmd.contains(customBinary))
+        #expect(cmd.contains("Launch mode: persistentSandbox"))
+        #expect(cmd.contains("/usr/bin/sandbox-exec"))
+    }
+
+    @Test func makeLaunchZoomCommandMissingBinaryMentionsCustomPath() {
+        let customBinary = "/Users/me/Apps/zoom.us.app/Contents/MacOS/zoom.us"
+        let cmd = ShellCommands.makeLaunchZoomCommand(zoomBinaryPath: customBinary, zoomBinaryExists: false)
+        #expect(cmd.contains("Launch mode: sandboxRequiredMissingBinary"))
+        #expect(cmd.contains(customBinary))
+        #expect(!cmd.contains("/usr/bin/sandbox-exec"))
+    }
+
     // MARK: - Machine Architecture
 
     @Test func machineArchitecture() {

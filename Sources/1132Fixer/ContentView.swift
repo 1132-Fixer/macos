@@ -133,7 +133,16 @@ final class AppViewModel: ObservableObject {
     private let stopZoomCommand = ShellCommands.stopZoom
     private let stopZoomUpdatersCommand = ShellCommands.stopZoomUpdaters
     private let refreshDNSAppleScript = ShellCommands.refreshDNSAppleScript
-    private let zoomBinaryPath = ShellCommands.zoomBinaryPath
+
+    /// The `zoom.us.app` bundle path currently in effect. `nil` means the default
+    /// `/Applications` location; a non-nil value is a user-selected location.
+    @Published var customZoomAppPath: String? = ZoomLocation.customAppPath
+
+    /// The effective Zoom executable path (default or user-selected).
+    private var zoomBinaryPath: String { ZoomLocation.binaryPath }
+
+    /// The effective `zoom.us.app` bundle path (default or user-selected).
+    var zoomAppPath: String { ZoomLocation.appPath }
 
     func startZoom() {
         lastRunResults = nil
@@ -296,7 +305,7 @@ final class AppViewModel: ObservableObject {
                 let output = try await self.runProcess(
                     stepName: "Launch Zoom",
                     executable: Constants.bashPath,
-                    arguments: ["-c", ShellCommands.makeLaunchZoomCommand()],
+                    arguments: ["-c", ShellCommands.makeLaunchZoomCommand(zoomBinaryPath: self.zoomBinaryPath)],
                     timeout: 120
                 )
                 self.markStepDone("launch", succeeded: true)
@@ -377,7 +386,10 @@ final class AppViewModel: ObservableObject {
 
             // Check Zoom
             let zoomInstalled = FileManager.default.fileExists(atPath: self.zoomBinaryPath)
-            results.append("Zoom binary: \(zoomInstalled ? "Found" : "NOT FOUND at \(self.zoomBinaryPath)")")
+            results.append("Zoom binary: \(zoomInstalled ? "Found" : "NOT FOUND") at \(self.zoomBinaryPath)")
+            if self.customZoomAppPath != nil {
+                results.append("Zoom location: Custom (\(self.zoomAppPath))")
+            }
 
             let zoomRunning = (try? await self.runProcess(
                 stepName: "Check Zoom process",
@@ -445,7 +457,13 @@ final class AppViewModel: ObservableObject {
 
             // Zoom installed
             let zoomInstalled = FileManager.default.fileExists(atPath: zoomBinaryPath)
-            checks.append(.init(id: "zoom", label: "Zoom App", value: zoomInstalled ? "Installed" : "Not found", isWarning: !zoomInstalled))
+            let zoomValue: String
+            if zoomInstalled {
+                zoomValue = customZoomAppPath != nil ? "Installed (custom location)" : "Installed"
+            } else {
+                zoomValue = "Not found"
+            }
+            checks.append(.init(id: "zoom", label: "Zoom App", value: zoomValue, isWarning: !zoomInstalled))
 
             // Active interface & VPN
             do {
@@ -862,7 +880,46 @@ If your network connection is disrupted after this step:
     }
 
     private func makeLaunchZoomCommand() -> String {
-        ShellCommands.makeLaunchZoomCommand()
+        ShellCommands.makeLaunchZoomCommand(zoomBinaryPath: zoomBinaryPath)
+    }
+
+    // MARK: - Zoom Location
+
+    /// Prompts the user to choose a `zoom.us.app` bundle when Zoom is installed
+    /// outside the default location. Sandbox-mode launch is unchanged; only the
+    /// bundle location is configurable.
+    func chooseZoomLocation() {
+        let panel = NSOpenPanel()
+        panel.title = "Select Zoom Application"
+        panel.message = "Choose the Zoom app (zoom.us.app) if it is installed outside the default Applications folder."
+        panel.prompt = "Select"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        let selectedPath = url.path
+        guard let validated = ZoomLocation.validatedAppPath(selectedPath) else {
+            appendLog("Selected app is not a valid Zoom installation: \(selectedPath)")
+            workflowState = .failed("The selected app does not contain the Zoom executable. Choose 'zoom.us.app'.")
+            return
+        }
+
+        ZoomLocation.customAppPath = validated
+        customZoomAppPath = validated
+        appendLog("Zoom location set to: \(validated)")
+        runPreflight()
+    }
+
+    /// Reverts to the default `/Applications/zoom.us.app` location.
+    func resetZoomLocation() {
+        ZoomLocation.customAppPath = nil
+        customZoomAppPath = nil
+        appendLog("Zoom location reset to default: \(ZoomLocation.defaultAppPath)")
+        runPreflight()
     }
 
     private func ensureMediaAccessForSandboxedZoom() async throws -> String {
@@ -1067,6 +1124,14 @@ struct ContentView: View {
                 )
 
                 PreflightPanel(preflight: vm.preflight)
+
+                ZoomLocationPanel(
+                    appPath: vm.zoomAppPath,
+                    isCustom: vm.customZoomAppPath != nil,
+                    isDisabled: vm.isRunning,
+                    onChoose: { vm.chooseZoomLocation() },
+                    onReset: { vm.resetZoomLocation() }
+                )
 
                 HStack(spacing: 14) {
                     ActionCard(
@@ -1531,6 +1596,72 @@ private struct PreflightPanel: View {
                             RoundedRectangle(cornerRadius: 4, style: .continuous)
                                 .stroke(item.supported ? Color.green.opacity(0.25) : Color.red.opacity(0.2), lineWidth: 0.5)
                         )
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(.ultraThinMaterial.opacity(0.7))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+        )
+    }
+}
+
+private struct ZoomLocationPanel: View {
+    let appPath: String
+    let isCustom: Bool
+    let isDisabled: Bool
+    let onChoose: () -> Void
+    let onReset: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Label("Zoom Location", systemImage: "folder.circle.fill")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                Spacer()
+                if isCustom {
+                    Text("Custom")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(Color.blue.opacity(0.28))
+                        )
+                }
+            }
+
+            Text(appPath)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.85))
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+
+            HStack(spacing: 8) {
+                Button(action: onChoose) {
+                    Label("Choose Location…", systemImage: "folder")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(isDisabled)
+
+                if isCustom {
+                    Button(action: onReset) {
+                        Text("Use Default")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    }
+                    .controlSize(.small)
+                    .disabled(isDisabled)
                 }
             }
         }

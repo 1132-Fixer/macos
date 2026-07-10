@@ -1,8 +1,65 @@
 import Foundation
 
+/// Resolves the Zoom application location, allowing the user to select a custom
+/// path when Zoom is not installed in the default `/Applications` location.
+///
+/// Sandbox-mode launch behavior is unchanged: the resolved binary is always run
+/// through `sandbox-exec`. Only the location of the `zoom.us.app` bundle is
+/// configurable.
+enum ZoomLocation {
+    private static let defaultsKey = "customZoomAppPath"
+
+    static var defaultAppPath: String { ShellCommands.defaultZoomAppPath }
+
+    /// The user-selected `zoom.us.app` bundle path, if one has been chosen.
+    static var customAppPath: String? {
+        get {
+            let value = UserDefaults.standard.string(forKey: defaultsKey)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return (value?.isEmpty == false) ? value : nil
+        }
+        set {
+            let defaults = UserDefaults.standard
+            if let path = newValue?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty {
+                defaults.set(path, forKey: defaultsKey)
+            } else {
+                defaults.removeObject(forKey: defaultsKey)
+            }
+        }
+    }
+
+    /// The `zoom.us.app` bundle path currently in effect (custom if set, else default).
+    static var appPath: String { customAppPath ?? defaultAppPath }
+
+    /// The Zoom executable path currently in effect.
+    static var binaryPath: String { ShellCommands.zoomBinaryPath(forAppPath: appPath) }
+
+    /// Whether a usable Zoom executable exists at the currently-effective location.
+    static var isInstalled: Bool { FileManager.default.fileExists(atPath: binaryPath) }
+
+    /// Validates that a chosen bundle path is a `zoom.us.app` containing the Zoom
+    /// executable. Returns the normalized bundle path, or `nil` if invalid.
+    static func validatedAppPath(_ selectedPath: String) -> String? {
+        let path = selectedPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty else { return nil }
+        let binary = ShellCommands.zoomBinaryPath(forAppPath: path)
+        guard FileManager.default.fileExists(atPath: binary) else { return nil }
+        return path
+    }
+}
+
 enum ShellCommands {
     static let bashPath = "/bin/bash"
     static let osascriptPath = "/usr/bin/osascript"
+    static let defaultZoomAppPath = "/Applications/zoom.us.app"
+
+    /// Derives the Zoom executable path from a `zoom.us.app` bundle path.
+    static func zoomBinaryPath(forAppPath appPath: String) -> String {
+        (appPath as NSString).appendingPathComponent("Contents/MacOS/zoom.us")
+    }
+
+    /// Binary path for the default install location. A user-selected location is
+    /// resolved through `ZoomLocation` and passed explicitly where it matters.
     static let zoomBinaryPath = "/Applications/zoom.us.app/Contents/MacOS/zoom.us"
 
     // MARK: - Shell Quoting
@@ -422,16 +479,27 @@ Turn off your VPN, wait a few seconds for your normal connection to restore, and
     """
 
     static func makeLaunchZoomCommand() -> String {
-        makeLaunchZoomCommand(zoomBinaryExists: FileManager.default.fileExists(atPath: zoomBinaryPath))
+        makeLaunchZoomCommand(zoomBinaryPath: zoomBinaryPath)
+    }
+
+    static func makeLaunchZoomCommand(zoomBinaryPath: String) -> String {
+        makeLaunchZoomCommand(
+            zoomBinaryPath: zoomBinaryPath,
+            zoomBinaryExists: FileManager.default.fileExists(atPath: zoomBinaryPath)
+        )
     }
 
     static func makeLaunchZoomCommand(zoomBinaryExists: Bool) -> String {
+        makeLaunchZoomCommand(zoomBinaryPath: zoomBinaryPath, zoomBinaryExists: zoomBinaryExists)
+    }
+
+    static func makeLaunchZoomCommand(zoomBinaryPath: String, zoomBinaryExists: Bool) -> String {
         guard zoomBinaryExists else {
-            return #"""
+            return """
             echo "Launch mode: sandboxRequiredMissingBinary"
-            echo "Error: Zoom must be launched in sandbox mode, but the Zoom binary was not found at /Applications/zoom.us.app/Contents/MacOS/zoom.us. Install Zoom from https://zoom.us/download and try again."
+            echo "Error: Zoom must be launched in sandbox mode, but the Zoom binary was not found at \(zoomBinaryPath). Install Zoom from https://zoom.us/download, or pick the correct Zoom location in 1132 Fixer, and try again."
             exit 1
-            """#
+            """
         }
 
         let encodedProfile = Data(zoomSandboxProfile.utf8).base64EncodedString()
