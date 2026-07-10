@@ -9,8 +9,36 @@ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 copies of the Software, and to permit persons to whom the Software is
 furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. The above copyright notice and this permission notice shall be included in
+   all copies or substantial portions of the Software.
+
+2. Attribution is required. Any copy, fork, modification, or derivative work
+   of the Software, and any product or service that incorporates the Software
+   or substantial portions of it, must give clear and prominent credit to the
+   original project by including:
+
+   (a) the name of the original project, "1132 Fixer"; and
+   (b) a working link to the original repository:
+       https://github.com/PrimeUpYourLife/1132-fixer
+
+   This credit must appear in at least the README (or equivalent primary
+   documentation) of any redistributed or derivative repository, and in any
+   "About" section or credits screen if the Software is distributed as part
+   of an application.
+
+3. You may not misrepresent the origin of the Software. You must not claim
+   that you wrote the original Software, present the Software or a derivative
+   work as entirely your own creation, or remove or obscure the attribution
+   required by condition 2. Modified versions must be clearly marked as
+   modified and must not be presented as the original Software.
+
+4. The names "1132 Fixer" and "PrimeUpYourLife" may not be used to endorse
+   or promote derivative works without prior written permission, except for
+   the factual attribution required by condition 2.
+
+5. Failure to comply with any of the above conditions automatically
+   terminates the rights granted by this license. Rights are reinstated only
+   once the violation is fully cured.
 
 THE SOFTWARE IS PROVIDED "AS IS", "WITH ALL FAULTS", AND "AS AVAILABLE",
 WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO

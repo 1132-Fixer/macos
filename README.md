@@ -21,6 +21,11 @@ On launch, the app checks the GitHub Releases `latest` endpoint and prompts if a
 
 This project is licensed under the terms in `LICENSE`.
 
+Attribution is required: any copy, fork, or derivative of this project must
+give clear and prominent credit to the original project, **1132 Fixer**, with
+a working link to <https://github.com/PrimeUpYourLife/1132-fixer>. You may
+not claim the original work as your own. See `LICENSE` for the full terms.
+
 The software is provided "as is" with no warranty. Installing and using it is
 at your own risk, and users accept responsibility for any impact on their
 systems, network connectivity, or data.
