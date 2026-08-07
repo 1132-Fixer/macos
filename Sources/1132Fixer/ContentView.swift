@@ -1087,6 +1087,137 @@ If your network connection is disrupted after this step:
 
 }
 
+/// Shared design tokens. Spacing follows an 8-point system; radii, typography and
+/// surface treatments are defined once so every panel and control matches.
+private enum Design {
+    // 8-point spacing scale
+    static let s1: CGFloat = 8
+    static let s2: CGFloat = 16
+    static let s3: CGFloat = 24
+    static let s4: CGFloat = 32
+
+    // Corner radii
+    static let panelRadius: CGFloat = 20
+    static let cardRadius: CGFloat = 20
+    static let controlRadius: CGFloat = 10
+    static let badgeRadius: CGFloat = 999
+
+    // Control metrics
+    static let controlHeight: CGFloat = 32
+    static let iconColumn: CGFloat = 18
+
+    // Surfaces
+    static let panelFill = Color.white.opacity(0.05)
+    static let panelStroke = Color.white.opacity(0.08)
+    static let controlFill = Color.white.opacity(0.08)
+    static let controlStroke = Color.white.opacity(0.10)
+
+    // Text
+    static let primaryText = Color.white
+    static let secondaryText = Color.white.opacity(0.62)
+    static let tertiaryText = Color.white.opacity(0.45)
+
+    static let accent = Color(red: 0.13, green: 0.50, blue: 0.86)
+    static let neutralAccent = Color(red: 0.62, green: 0.66, blue: 0.72)
+}
+
+/// Lightweight panel chrome: soft fill, hairline stroke, generous radius.
+private struct PanelChrome: ViewModifier {
+    var padding: CGFloat = Design.s3
+    var radius: CGFloat = Design.panelRadius
+
+    func body(content: Content) -> some View {
+        content
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .fill(Design.panelFill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(Design.panelStroke, lineWidth: 1)
+            )
+    }
+}
+
+private extension View {
+    func panelChrome(padding: CGFloat = Design.s3, radius: CGFloat = Design.panelRadius) -> some View {
+        modifier(PanelChrome(padding: padding, radius: radius))
+    }
+}
+
+/// Section heading used by every panel: fixed-width icon column + title.
+private struct SectionHeader: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        HStack(spacing: Design.s1 + 2) {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Design.primaryText.opacity(0.85))
+                .frame(width: Design.iconColumn, alignment: .center)
+            Text(title)
+                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                .foregroundStyle(Design.primaryText)
+        }
+    }
+}
+
+/// Native-feeling secondary control chrome shared by every button in the app so
+/// height, radius, padding and icon spacing stay identical.
+private struct SecondaryControlChrome: ViewModifier {
+    var isProminent: Bool = false
+    @State private var isHovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .font(.system(size: 12, weight: .medium, design: .rounded))
+            .foregroundStyle(Design.primaryText)
+            .labelStyle(ControlLabelStyle())
+            .padding(.horizontal, Design.s2)
+            .frame(height: Design.controlHeight)
+            .background(
+                RoundedRectangle(cornerRadius: Design.controlRadius, style: .continuous)
+                    .fill(isProminent
+                          ? Design.accent.opacity(isHovering ? 1.0 : 0.9)
+                          : Design.controlFill.opacity(isHovering ? 1.6 : 1.0))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Design.controlRadius, style: .continuous)
+                    .strokeBorder(isProminent ? Color.clear : Design.controlStroke, lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: Design.controlRadius, style: .continuous))
+            .onHover { isHovering = $0 }
+    }
+}
+
+/// Keeps icon/label spacing identical across every control.
+private struct ControlLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 6) {
+            configuration.icon
+                .font(.system(size: 12, weight: .medium))
+            configuration.title
+        }
+    }
+}
+
+private extension View {
+    func secondaryControl(isProminent: Bool = false) -> some View {
+        modifier(SecondaryControlChrome(isProminent: isProminent))
+    }
+}
+
+/// Button style that gives every control the same pressed feedback.
+private struct AppButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.7 : 1.0)
+    }
+}
+
 struct ContentView: View {
     @StateObject private var vm = AppViewModel()
     private let repositoryURL = URL(string: "https://github.com/PrimeUpYourLife/1132-fixer")!
@@ -1104,16 +1235,16 @@ struct ContentView: View {
         ZStack {
             LinearGradient(
                 colors: [
-                    Color(red: 0.05, green: 0.08, blue: 0.16),
-                    Color(red: 0.08, green: 0.19, blue: 0.30),
-                    Color(red: 0.16, green: 0.27, blue: 0.38)
+                    Color(red: 0.04, green: 0.07, blue: 0.13),
+                    Color(red: 0.05, green: 0.10, blue: 0.18),
+                    Color(red: 0.06, green: 0.13, blue: 0.22)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
             .ignoresSafeArea()
 
-            VStack(spacing: 14) {
+            VStack(spacing: Design.s3) {
                 HeaderCard(
                     repositoryURL: repositoryURL,
                     websiteURL: websiteURL,
@@ -1133,12 +1264,13 @@ struct ContentView: View {
                     onReset: { vm.resetZoomLocation() }
                 )
 
-                HStack(spacing: 14) {
+                HStack(spacing: Design.s2) {
                     ActionCard(
                         title: "Start Zoom",
                         subtitle: "Checks the active network, resets Zoom data, refreshes DNS cache, and launches Zoom in sandbox mode.",
                         systemImage: "video.circle.fill",
-                        tint: Color(red: 0.13, green: 0.50, blue: 0.86),
+                        tint: Design.accent,
+                        isPrimary: true,
                         isDisabled: vm.isRunning,
                         action: {
                             vm.startZoom()
@@ -1150,7 +1282,8 @@ struct ContentView: View {
                             title: "Cancel",
                             subtitle: "Stop the running workflow.",
                             systemImage: "xmark.circle.fill",
-                            tint: Color.red.opacity(0.8),
+                            tint: Color.red.opacity(0.85),
+                            isPrimary: false,
                             isDisabled: false,
                             action: {
                                 vm.cancelWorkflow()
@@ -1162,7 +1295,8 @@ struct ContentView: View {
                             title: "Dry Run",
                             subtitle: "Check system state without making any changes.",
                             systemImage: "eye.circle.fill",
-                            tint: Color(red: 0.55, green: 0.55, blue: 0.62),
+                            tint: Design.neutralAccent,
+                            isPrimary: false,
                             isDisabled: vm.isRunning,
                             action: {
                                 vm.dryRun()
@@ -1170,6 +1304,7 @@ struct ContentView: View {
                         )
                     }
                 }
+                .fixedSize(horizontal: false, vertical: true)
 
                 if let progress = vm.workflowProgress {
                     WorkflowProgressBar(progress: progress)
@@ -1177,11 +1312,9 @@ struct ContentView: View {
 
                 LogPanel(logs: vm.logs, onCopy: vm.copyLogs, onClear: vm.clearLogs)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            .padding(.bottom, 20)
+            .padding(Design.s3)
         }
-        .frame(minWidth: 620, minHeight: 520)
+        .frame(minWidth: 720, minHeight: 640)
         .onAppear { vm.runPreflight() }
         .task {
             // Only check for updates in packaged apps that have a real version.
@@ -1268,31 +1401,31 @@ private struct BugReportFormSheet: View {
     let onSubmit: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Design.s2) {
             Text("Report a bug")
-                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .font(.system(size: 20, weight: .semibold, design: .rounded))
 
             Text("Add an optional email and a message.")
-                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .font(.system(size: 13, weight: .regular, design: .rounded))
                 .foregroundStyle(.secondary)
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: Design.s1) {
                 Text("E-mail or Telegram (optional)")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
                 TextField("user@example.com", text: $email)
                     .textFieldStyle(.roundedBorder)
                     .disabled(isSubmitting)
             }
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: Design.s1) {
                 Text("Message")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
                 TextEditor(text: $message)
-                    .font(.system(size: 12, weight: .regular, design: .rounded))
+                    .font(.system(size: 13, weight: .regular, design: .rounded))
                     .frame(minHeight: 120)
-                    .padding(6)
+                    .padding(Design.s1)
                     .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        RoundedRectangle(cornerRadius: Design.controlRadius, style: .continuous)
                             .fill(Color.black.opacity(0.08))
                     )
                     .disabled(isSubmitting)
@@ -1307,8 +1440,8 @@ private struct BugReportFormSheet: View {
                     .disabled(isSubmitting)
             }
         }
-        .padding(18)
-        .frame(width: 460)
+        .padding(Design.s3)
+        .frame(width: 480)
     }
 }
 
@@ -1321,57 +1454,46 @@ private struct HeaderCard: View {
     let appVersion: String
 
     var body: some View {
-        HStack(alignment: .center, spacing: 14) {
+        HStack(alignment: .center, spacing: Design.s2) {
             ZStack {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color.white.opacity(0.14))
-                    .frame(width: 58, height: 58)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.white.opacity(0.12))
+                    .frame(width: 64, height: 64)
                 Image(systemName: "video.badge.waveform.fill")
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundStyle(.white)
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundStyle(Design.primaryText)
             }
 
-            Text("1132 Fixer")
-                .font(.system(size: 29, weight: .black, design: .rounded))
-                .foregroundStyle(.white)
-
-            Spacer()
-
-            VStack(spacing: 6) {
-                HStack(spacing: 8) {
-                    HeaderLinkButton(title: "GitHub", systemImage: "link.circle.fill", destination: repositoryURL)
-                        .frame(maxWidth: .infinity)
-                    HeaderLinkButton(title: "Website", systemImage: "globe", destination: websiteURL)
-                        .frame(maxWidth: .infinity)
-                }
-                HStack(spacing: 8) {
-                    HeaderActionButton(
-                        title: "Report a bug",
-                        systemImage: "ladybug.fill",
-                        isDisabled: isReportBugDisabled,
-                        action: onReportBug
-                    )
-                    .frame(maxWidth: .infinity)
-                    HeaderActionButton(
-                        title: "Export Diagnostics",
-                        systemImage: "square.and.arrow.up",
-                        isDisabled: false,
-                        action: onExportDiagnostics
-                    )
-                    .frame(maxWidth: .infinity)
-                }
+            VStack(alignment: .leading, spacing: 2) {
+                Text("1132 Fixer")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(Design.primaryText)
+                Text("Zoom diagnostic & repair")
+                    .font(.system(size: 12, weight: .regular, design: .rounded))
+                    .foregroundStyle(Design.secondaryText)
             }
-            .frame(width: 280)
+
+            Spacer(minLength: Design.s2)
+
+            HStack(spacing: Design.s1) {
+                HeaderLinkButton(title: "GitHub", systemImage: "link", destination: repositoryURL)
+                HeaderLinkButton(title: "Website", systemImage: "globe", destination: websiteURL)
+                HeaderActionButton(
+                    title: "Report a bug",
+                    systemImage: "ladybug",
+                    isDisabled: isReportBugDisabled,
+                    action: onReportBug
+                )
+                HeaderActionButton(
+                    title: "Export Diagnostics",
+                    systemImage: "square.and.arrow.up",
+                    isDisabled: false,
+                    action: onExportDiagnostics
+                )
+            }
+            .fixedSize()
         }
-        .padding(18)
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(.ultraThinMaterial.opacity(0.82))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color.white.opacity(0.16), lineWidth: 1)
-        )
+        .panelChrome(padding: Design.s2 + 4)
     }
 }
 
@@ -1383,9 +1505,9 @@ private struct HeaderLinkButton: View {
     var body: some View {
         Link(destination: destination) {
             Label(title, systemImage: systemImage)
+                .secondaryControl()
         }
-        .buttonStyle(.plain)
-        .modifier(HeaderButtonChrome())
+        .buttonStyle(AppButtonStyle())
     }
 }
 
@@ -1398,29 +1520,11 @@ private struct HeaderActionButton: View {
     var body: some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
+                .secondaryControl()
         }
-        .buttonStyle(.plain)
+        .buttonStyle(AppButtonStyle())
         .disabled(isDisabled)
-        .opacity(isDisabled ? 0.58 : 1.0)
-        .modifier(HeaderButtonChrome())
-    }
-}
-
-private struct HeaderButtonChrome: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .font(.system(size: 12, weight: .semibold, design: .rounded))
-            .foregroundStyle(.white)
-            .padding(.vertical, 10)
-            .padding(.horizontal, 14)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.black.opacity(0.24))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
-            )
+        .opacity(isDisabled ? 0.5 : 1.0)
     }
 }
 
@@ -1429,49 +1533,63 @@ private struct ActionCard: View {
     let subtitle: String
     let systemImage: String
     let tint: Color
+    /// Primary cards keep the accent glow; secondary cards differ only by icon color.
+    let isPrimary: Bool
     let isDisabled: Bool
     let action: () -> Void
 
+    @State private var isHovering = false
+
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: systemImage)
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(tint)
+            HStack(alignment: .top, spacing: Design.s2) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 22, weight: .regular))
+                    .foregroundStyle(tint)
+                    .frame(width: 26, alignment: .center)
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(title)
-                            .font(.system(size: 19, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
+                VStack(alignment: .leading, spacing: Design.s1) {
+                    Text(title)
+                        .font(.system(size: 20, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Design.primaryText)
 
-                        Text(subtitle)
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.78))
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    Spacer(minLength: 12)
-
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 13, weight: .black))
-                        .foregroundStyle(.white.opacity(0.7))
+                    Text(subtitle)
+                        .font(.system(size: 13, weight: .regular, design: .rounded))
+                        .foregroundStyle(Design.secondaryText)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+
+                Spacer(minLength: Design.s2)
+
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Design.tertiaryText)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(15)
+            .padding(Design.s3)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.black.opacity(0.26))
+                RoundedRectangle(cornerRadius: Design.cardRadius, style: .continuous)
+                    .fill(isPrimary ? tint.opacity(0.10) : Design.panelFill)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(tint.opacity(0.65), lineWidth: 1)
+                RoundedRectangle(cornerRadius: Design.cardRadius, style: .continuous)
+                    .strokeBorder(
+                        isPrimary ? tint.opacity(isHovering ? 0.55 : 0.38) : Design.panelStroke,
+                        lineWidth: 1
+                    )
             )
-            .opacity(isDisabled ? 0.58 : 1.0)
+            .shadow(
+                color: isPrimary ? tint.opacity(isHovering ? 0.32 : 0.18) : .clear,
+                radius: 16,
+                y: 4
+            )
+            .opacity(isDisabled ? 0.5 : 1.0)
+            .contentShape(RoundedRectangle(cornerRadius: Design.cardRadius, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(AppButtonStyle())
         .disabled(isDisabled)
+        .onHover { isHovering = $0 }
     }
 }
 
@@ -1479,29 +1597,23 @@ private struct WorkflowProgressBar: View {
     let progress: AppViewModel.WorkflowProgress
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(alignment: .top, spacing: Design.s1) {
             ForEach(progress.steps) { step in
-                VStack(spacing: 3) {
+                VStack(spacing: Design.s1) {
                     stepIcon(step.state)
-                        .font(.system(size: 10))
+                        .font(.system(size: 14))
+                        .frame(height: 16)
                     Text(step.name)
-                        .font(.system(size: 9, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .font(.system(size: 11, weight: .regular, design: .rounded))
+                        .foregroundStyle(Design.secondaryText)
+                        .multilineTextAlignment(.center)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                 }
                 .frame(maxWidth: .infinity)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.ultraThinMaterial.opacity(0.6))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.white.opacity(0.1), lineWidth: 1)
-        )
+        .panelChrome(padding: Design.s2, radius: 16)
     }
 
     @ViewBuilder
@@ -1509,10 +1621,10 @@ private struct WorkflowProgressBar: View {
         switch state {
         case .pending:
             Image(systemName: "circle")
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(Design.tertiaryText)
         case .running:
             ProgressView()
-                .controlSize(.mini)
+                .controlSize(.small)
         case .succeeded:
             Image(systemName: "checkmark.circle.fill")
                 .foregroundStyle(.green)
@@ -1540,75 +1652,81 @@ private struct PreflightPanel: View {
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Preflight Checks", systemImage: "checklist")
-                .font(.system(size: 14, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+        VStack(alignment: .leading, spacing: Design.s2) {
+            SectionHeader(title: "Preflight Checks", systemImage: "checklist")
 
             switch preflight.status {
             case .loading:
-                HStack(spacing: 8) {
+                HStack(spacing: Design.s1) {
                     ProgressView()
                         .controlSize(.small)
                     Text("Checking system...")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.72))
+                        .font(.system(size: 13, weight: .regular, design: .rounded))
+                        .foregroundStyle(Design.secondaryText)
                 }
             case .error(let msg):
                 Text(msg)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(.system(size: 12, weight: .regular, design: .monospaced))
                     .foregroundStyle(.red.opacity(0.9))
             case .ready:
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 6) {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: Design.s3, alignment: .leading),
+                        GridItem(.flexible(), spacing: Design.s3, alignment: .leading)
+                    ],
+                    alignment: .leading,
+                    spacing: Design.s2
+                ) {
                     ForEach(preflight.checks) { check in
-                        HStack(spacing: 6) {
+                        HStack(alignment: .firstTextBaseline, spacing: Design.s1 + 2) {
                             Image(systemName: check.isWarning ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                                .font(.system(size: 11))
+                                .font(.system(size: 13))
                                 .foregroundStyle(check.isWarning ? .yellow : .green)
+                                .frame(width: Design.iconColumn, alignment: .center)
                             Text(check.label + ":")
-                                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                                .foregroundStyle(.white.opacity(0.72))
+                                .font(.system(size: 13, weight: .medium, design: .rounded))
+                                .foregroundStyle(Design.secondaryText)
                             Text(check.value)
-                                .font(.system(size: 11, weight: .medium, design: .rounded))
-                                .foregroundStyle(.white.opacity(0.92))
+                                .font(.system(size: 13, weight: .regular, design: .rounded))
+                                .foregroundStyle(Design.primaryText.opacity(0.9))
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
             }
 
-            Divider().background(Color.white.opacity(0.12))
+            Divider()
+                .overlay(Color.white.opacity(0.08))
+                .padding(.vertical, Design.s1)
 
-            HStack(spacing: 6) {
+            HStack(spacing: Design.s1) {
                 Text("Supported:")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .font(.system(size: 11, weight: .regular, design: .rounded))
+                    .foregroundStyle(Design.tertiaryText)
                 ForEach(Self.supportMatrix, id: \.label) { item in
-                    Text(item.label)
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                        .foregroundStyle(item.supported ? .white.opacity(0.8) : .white.opacity(0.4))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(
-                            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .fill(item.supported ? Color.green.opacity(0.18) : Color.red.opacity(0.15))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .stroke(item.supported ? Color.green.opacity(0.25) : Color.red.opacity(0.2), lineWidth: 0.5)
-                        )
+                    SupportBadge(label: item.label, supported: item.supported)
                 }
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.ultraThinMaterial.opacity(0.7))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
-        )
+        .panelChrome()
+    }
+}
+
+/// Informational pill in the support matrix — soft fill, no hard outline.
+private struct SupportBadge: View {
+    let label: String
+    let supported: Bool
+
+    var body: some View {
+        Text(label)
+            .font(.system(size: 11, weight: .medium, design: .rounded))
+            .foregroundStyle(supported ? Color.green.opacity(0.85) : Color.red.opacity(0.75))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(supported ? Color.green.opacity(0.12) : Color.red.opacity(0.12))
+            )
     }
 }
 
@@ -1620,61 +1738,55 @@ private struct ZoomLocationPanel: View {
     let onReset: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Label("Zoom Location", systemImage: "folder.circle.fill")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                Spacer()
-                if isCustom {
-                    Text("Custom")
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.85))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(
-                            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .fill(Color.blue.opacity(0.28))
-                        )
+        HStack(alignment: .center, spacing: Design.s3) {
+            VStack(alignment: .leading, spacing: Design.s1 + 4) {
+                HStack(spacing: Design.s1) {
+                    SectionHeader(title: "Zoom Location", systemImage: "folder")
+                    if isCustom {
+                        Text("Custom")
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundStyle(Design.accent)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(Design.accent.opacity(0.16))
+                            )
+                    }
                 }
+
+                Text(appPath)
+                    .font(.system(size: 13, weight: .regular, design: .default))
+                    .foregroundStyle(Design.secondaryText)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
             }
 
-            Text(appPath)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.85))
-                .lineLimit(2)
-                .truncationMode(.middle)
-                .textSelection(.enabled)
+            Spacer(minLength: Design.s2)
 
-            HStack(spacing: 8) {
-                Button(action: onChoose) {
-                    Label("Choose Location…", systemImage: "folder")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .disabled(isDisabled)
-
+            HStack(spacing: Design.s1) {
                 if isCustom {
                     Button(action: onReset) {
                         Text("Use Default")
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .secondaryControl()
                     }
-                    .controlSize(.small)
+                    .buttonStyle(AppButtonStyle())
                     .disabled(isDisabled)
+                    .opacity(isDisabled ? 0.5 : 1.0)
                 }
+
+                Button(action: onChoose) {
+                    Label("Choose Location…", systemImage: "folder")
+                        .secondaryControl(isProminent: true)
+                }
+                .buttonStyle(AppButtonStyle())
+                .disabled(isDisabled)
+                .opacity(isDisabled ? 0.5 : 1.0)
             }
+            .fixedSize()
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.ultraThinMaterial.opacity(0.7))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
-        )
+        .panelChrome()
     }
 }
 
@@ -1683,61 +1795,69 @@ private struct LogPanel: View {
     let onCopy: () -> Void
     let onClear: () -> Void
 
+    @State private var isExpanded = true
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("Activity Log", systemImage: "terminal")
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+        VStack(alignment: .leading, spacing: Design.s2) {
+            HStack(spacing: Design.s1) {
+                SectionHeader(title: "Activity Log", systemImage: "terminal")
 
-                Spacer()
+                Spacer(minLength: Design.s2)
 
-                Button("Copy") {
-                    onCopy()
+                Button(action: onCopy) {
+                    Text("Copy").secondaryControl()
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Color.white.opacity(0.2))
+                .buttonStyle(AppButtonStyle())
                 .disabled(logs.isEmpty)
+                .opacity(logs.isEmpty ? 0.5 : 1.0)
 
-                Button("Clear") {
-                    onClear()
+                Button(action: onClear) {
+                    Text("Clear").secondaryControl()
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Color.white.opacity(0.2))
+                .buttonStyle(AppButtonStyle())
                 .disabled(logs.isEmpty)
+                .opacity(logs.isEmpty ? 0.5 : 1.0)
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .rotationEffect(.degrees(isExpanded ? 0 : -90))
+                        .frame(width: 14)
+                        .secondaryControl()
+                }
+                .buttonStyle(AppButtonStyle())
+                .help(isExpanded ? "Collapse activity log" : "Expand activity log")
             }
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
-                    if logs.isEmpty {
-                        Text("No logs yet. Run an action to see output.")
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.72))
-                            .padding(.top, 2)
-                    } else {
-                        ForEach(Array(logs.enumerated()), id: \.offset) { _, line in
-                            Text(line)
+            if isExpanded {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        if logs.isEmpty {
+                            Text("No logs yet. Run an action to see output.")
                                 .font(.system(size: 12, weight: .regular, design: .monospaced))
-                                .foregroundStyle(.white.opacity(0.92))
-                                .textSelection(.enabled)
+                                .foregroundStyle(Design.secondaryText)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 5)
-                                .padding(.horizontal, 8)
-                                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                .padding(.vertical, Design.s1)
+                        } else {
+                            ForEach(Array(logs.enumerated()), id: \.offset) { index, line in
+                                Text(line)
+                                    .font(.system(size: 12, weight: .regular, design: .monospaced))
+                                    .foregroundStyle(Design.primaryText.opacity(0.85))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.vertical, 6)
+                                    .padding(.horizontal, Design.s1 + 2)
+                                    .background(index.isMultiple(of: 2) ? Color.clear : Color.white.opacity(0.03))
+                            }
                         }
                     }
                 }
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .frame(maxHeight: .infinity)
             }
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(.ultraThinMaterial.opacity(0.8))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color.white.opacity(0.16), lineWidth: 1)
-        )
+        .panelChrome()
+        .frame(maxHeight: isExpanded ? .infinity : nil, alignment: .topLeading)
     }
 }
