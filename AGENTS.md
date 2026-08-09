@@ -27,11 +27,9 @@
 - Keep UI changes in SwiftUI and follow existing visual/component patterns.
 
 ## Design System
-- `design-system/` is a git submodule (`https://github.com/PrimeUpYourLife/1132-fixer-design-system.git`) and the source of truth for all design decisions.
-- For any design matter — colors, typography, spacing, components, icons, visual patterns — consult `design-system/` first and follow its tokens/components.
-- Do not invent new visual patterns, colors, or component styles that diverge from `design-system/`.
-- If `design-system/` lacks guidance for a needed case, ask the user before improvising rather than guessing.
-- Run `git submodule update --init --recursive` if `design-system/` appears empty.
+- Follow the existing visual/component patterns in `Sources/1132Fixer/` — do not invent new visual patterns, colors, or component styles.
+- If existing patterns lack guidance for a needed case, ask the user before improvising rather than guessing.
+- History note: a `design-system/` git submodule (PrimeUpYourLife/1132-fixer-design-system) was referenced briefly in 2026-08 and removed — the submodule repo is PRIVATE, and a private submodule inside this PUBLIC repo breaks every recursive clone. If that repo is ever made public, the submodule may be restored deliberately.
 
 ## 1132 Fixer Zoom Launch Rules
 
