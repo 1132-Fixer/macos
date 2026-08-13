@@ -1220,7 +1220,7 @@ private struct AppButtonStyle: ButtonStyle {
 
 struct ContentView: View {
     @StateObject private var vm = AppViewModel()
-    private let repositoryURL = URL(string: "https://github.com/PrimeUpYourLife/1132-fixer")!
+    private let repositoryURL = URL(string: "https://github.com/1132-Fixer/macos")!
     private let websiteURL = URL(string: "https://1132-fixer.xyz")!
     private let appVersion = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "dev"
 

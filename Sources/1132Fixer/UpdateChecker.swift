@@ -8,8 +8,8 @@ struct ReleaseInfo: Equatable {
 
 enum UpdateChecker {
     // Keep this aligned with the repository link in ContentView.
-    static let owner = "PrimeUpYourLife"
-    static let repo = "1132-fixer"
+    static let owner = "1132-Fixer"
+    static let repo = "macos"
     static let errorDomain = "1132Fixer.UpdateChecker"
     private static let userAgent = "1132Fixer"
 

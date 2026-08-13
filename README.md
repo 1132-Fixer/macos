@@ -1,12 +1,12 @@
 # 1132 Fixer
 
-## [Download the latest release here](https://github.com/PrimeUpYourLife/1132-fixer/releases/latest)
+## [Download the latest release here](https://github.com/1132-Fixer/macos/releases/latest)
 
 ## [Discuss on Telegram](https://t.me/Team1132Fixer)
 
 <img src="Sources/1132Fixer/Resources/AppIcon.png" width="128" alt="1132 Fixer app icon">
 
-![GitHub Release](https://img.shields.io/github/v/release/PrimeUpYourLife/1132-fixer?style=for-the-badge) ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/PrimeUpYourLife/1132-fixer/total?style=for-the-badge) ![Static Badge](https://img.shields.io/badge/mac-silicone-yellow?logo=apple&style=for-the-badge) ![Static Badge](https://img.shields.io/badge/mac-intel-purple?logo=apple&style=for-the-badge) ![Static Badge](https://img.shields.io/badge/mac-universal-green?logo=apple&style=for-the-badge)
+![GitHub Release](https://img.shields.io/github/v/release/1132-Fixer/macos?style=for-the-badge) ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/1132-Fixer/macos/total?style=for-the-badge) ![Static Badge](https://img.shields.io/badge/mac-silicone-yellow?logo=apple&style=for-the-badge) ![Static Badge](https://img.shields.io/badge/mac-intel-purple?logo=apple&style=for-the-badge) ![Static Badge](https://img.shields.io/badge/mac-universal-green?logo=apple&style=for-the-badge)
 
 ## Minimal macOS app with two actions
 
@@ -23,7 +23,7 @@ This project is licensed under the terms in `LICENSE`.
 
 Attribution is required: any copy, fork, or derivative of this project must
 give clear and prominent credit to the original project, **1132 Fixer**, with
-a working link to <https://github.com/PrimeUpYourLife/1132-fixer>. You may
+a working link to <https://github.com/1132-Fixer/macos>. You may
 not claim the original work as your own. See `LICENSE` for the full terms.
 
 The software is provided "as is" with no warranty. Installing and using it is
