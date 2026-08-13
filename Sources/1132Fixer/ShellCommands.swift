@@ -151,7 +151,8 @@ enum ShellCommands {
         let timestamp = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
         return """
-        backup_dir="$HOME/Library/Application Support/1132Fixer/Backups/\(timestamp)"
+        backups_root="$HOME/Library/Application Support/1132Fixer/Backups"
+        backup_dir="$backups_root/\(timestamp)"
         mkdir -p "$backup_dir"
         for src in \
           "$HOME/Library/Application Support/zoom.us" \
@@ -160,6 +161,20 @@ enum ShellCommands {
           "$HOME/Library/Saved Application State/us.zoom.xos.savedState"; do
           [ -e "$src" ] && cp -a "$src" "$backup_dir/" 2>/dev/null || true
         done
+
+        backup_count=0
+        for backup in "$backups_root"/*; do
+          [ -d "$backup" ] || continue
+          backup_count=$((backup_count + 1))
+        done
+        backups_to_delete=$((backup_count - 3))
+        for backup in "$backups_root"/*; do
+          [ "$backups_to_delete" -gt 0 ] || break
+          [ -d "$backup" ] || continue
+          rm -rf "$backup"
+          backups_to_delete=$((backups_to_delete - 1))
+        done
+
         echo "$backup_dir"
         """
     }
