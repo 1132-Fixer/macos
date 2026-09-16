@@ -80,6 +80,7 @@ final class AppViewModel: ObservableObject {
         case checkingMediaAccess
         case launchingZoom
         case resetCompleted
+        case dryRunCompleted
         case completed
         case failed(String)
         case canceled
@@ -390,6 +391,7 @@ final class AppViewModel: ObservableObject {
 
     func retryResetZoomData() {
         resetTimedOut = false
+        lastRunResults = nil
         workflowProgress = WorkflowProgress(steps: [
             .init(id: "resetData", name: "Reset Zoom Data", state: .pending)
         ])
@@ -410,6 +412,7 @@ final class AppViewModel: ObservableObject {
                 return "Zoom data reset completed. Run Start Zoom to continue."
             } catch {
                 self.markStepDone("resetData", succeeded: false)
+                self.lastRunResults = [.init(id: "resetData", name: "Clear Local State", succeeded: false, detail: error.localizedDescription)]
                 if (error as NSError).code == -1 {
                     self.resetTimedOut = true
                 }
@@ -421,7 +424,7 @@ final class AppViewModel: ObservableObject {
     func dryRun() {
         lastRunResults = nil
         workflowProgress = nil
-        runTask("Dry Run") {
+        runTask("Dry Run", completionState: .dryRunCompleted) {
             var results: [String] = []
 
             // Check macOS version
@@ -433,7 +436,7 @@ final class AppViewModel: ObservableObject {
             results.append("Architecture: \(arch == "arm64" ? "Apple Silicon" : (arch == "x86_64" ? "Intel" : arch))")
 
             // Check Zoom
-            let zoomInstalled = FileManager.default.fileExists(atPath: self.zoomBinaryPath)
+            let zoomInstalled = self.isZoomInstalled
             results.append("Zoom binary: \(zoomInstalled ? "Found" : "NOT FOUND") at \(self.zoomBinaryPath)")
             if self.customZoomAppPath != nil {
                 results.append("Zoom location: Custom (\(self.zoomAppPath))")
@@ -690,6 +693,7 @@ Last action status: \(lastStatus)
             return
         }
 
+        resetTimedOut = false
         isRunning = true
         appendLog("=== \(title) ===")
 
@@ -698,6 +702,7 @@ Last action status: \(lastStatus)
                 isRunning = false
                 runningTask = nil
                 currentProcess = nil
+                refreshPreflightMediaChecks()
             }
             do {
                 try Task.checkCancellation()
@@ -731,7 +736,9 @@ Last action status: \(lastStatus)
             if line.contains("=== Completed ===") {
                 return "Completed"
             }
-            if line.contains("=== Start Zoom ===") {
+            if line.contains("=== Start Zoom ===")
+                || line.contains("=== Retry Reset Zoom Data ===")
+                || line.contains("=== Dry Run ===") {
                 return "In Progress"
             }
         }
@@ -998,6 +1005,8 @@ If your network connection is disrupted after this step:
     }
 
     private func ensureMediaAccessForSandboxedZoom() async throws -> String {
+        defer { refreshPreflightMediaChecks() }
+
         let cameraStatus = try await ensureMediaAccess(
             mediaType: .video,
             displayName: "Camera",
@@ -1010,6 +1019,33 @@ If your network connection is disrupted after this step:
         )
 
         return "\(cameraStatus); \(microphoneStatus)"
+    }
+
+    private func refreshPreflightMediaChecks() {
+        guard !preflight.checks.isEmpty else { return }
+
+        var checks = preflight.checks
+        let cameraStatus = AVCaptureDevice.authorizationStatus(for: .video)
+        if let cameraIndex = checks.firstIndex(where: { $0.id == "camera" }) {
+            checks[cameraIndex] = .init(
+                id: "camera",
+                label: checks[cameraIndex].label,
+                value: mediaPermissionLabel(cameraStatus),
+                isWarning: cameraStatus == .denied || cameraStatus == .restricted
+            )
+        }
+
+        let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        if let microphoneIndex = checks.firstIndex(where: { $0.id == "microphone" }) {
+            checks[microphoneIndex] = .init(
+                id: "microphone",
+                label: checks[microphoneIndex].label,
+                value: mediaPermissionLabel(microphoneStatus),
+                isWarning: microphoneStatus == .denied || microphoneStatus == .restricted
+            )
+        }
+
+        preflight = PreflightInfo(status: preflight.status, checks: checks)
     }
 
     private func mediaPermissionLabel(_ status: AVAuthorizationStatus) -> String {
@@ -1770,6 +1806,8 @@ private struct WorkflowStatusPanel: View {
             return ("video.badge.checkmark", "Checking camera and microphone", "Zoom will still launch if access is unavailable, but affected devices will not work.", Design.accent)
         case .launchingZoom:
             return ("video.fill", "Launching Zoom securely", "Zoom is starting in required sandbox mode.", Design.accent)
+        case .dryRunCompleted:
+            return ("checkmark.circle.fill", "Dry run completed", "No repair or Zoom launch was performed.", .green)
         case .completed:
             return ("checkmark.circle.fill", "Repair completed", "Zoom launch completed. Review any warning steps above.", .green)
         case .resetCompleted:
