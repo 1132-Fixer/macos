@@ -1340,6 +1340,7 @@ private struct AppButtonStyle: ButtonStyle {
 }
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var vm = AppViewModel()
     private let repositoryURL = URL(string: "https://github.com/1132-Fixer/macos")!
     private let websiteURL = URL(string: "https://1132-fixer.xyz")!
@@ -1461,6 +1462,10 @@ struct ContentView: View {
         }
         .frame(minWidth: 720, minHeight: 640)
         .onAppear { vm.runPreflight() }
+        .onChange(of: scenePhase) { newPhase in
+            guard newPhase == .active else { return }
+            vm.runPreflight()
+        }
         .task {
             // Only check for updates in packaged apps that have a real version.
             guard appVersion != "dev" else { return }
