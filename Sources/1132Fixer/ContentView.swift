@@ -79,6 +79,8 @@ final class AppViewModel: ObservableObject {
         case stoppingUpdaters
         case checkingMediaAccess
         case launchingZoom
+        case resetCompleted
+        case dryRunCompleted
         case completed
         case failed(String)
         case canceled
@@ -128,6 +130,7 @@ final class AppViewModel: ObservableObject {
     @Published var preflight = PreflightInfo()
     @Published var lastRunResults: [StepResult]?
     @Published var workflowProgress: WorkflowProgress?
+    @Published var resetTimedOut = false
     private var runningTask: Task<Void, Never>?
     private var currentProcess: Process?
     private let stopZoomCommand = ShellCommands.stopZoom
@@ -144,7 +147,18 @@ final class AppViewModel: ObservableObject {
     /// The effective `zoom.us.app` bundle path (default or user-selected).
     var zoomAppPath: String { ZoomLocation.appPath }
 
+    var isZoomInstalled: Bool {
+        FileManager.default.isExecutableFile(atPath: zoomBinaryPath)
+    }
+
     func startZoom() {
+        guard isZoomInstalled else {
+            workflowState = .failed("Zoom is not installed at the selected location.")
+            appendLog("Start blocked: Zoom is not installed at \(zoomAppPath)")
+            return
+        }
+
+        resetTimedOut = false
         lastRunResults = nil
         initProgress(steps: [
             ("closeZoom", "Close Zoom"),
@@ -226,7 +240,7 @@ final class AppViewModel: ObservableObject {
             // 4. Reset Zoom data
             self.workflowState = .clearingState
             self.markStepRunning("resetData")
-            self.appendLog("Step: Reset Zoom data")
+            self.appendLog("Waiting for password to reset Zoom data…")
             do {
                 let resetCommand = ShellCommands.makeResetZoomDataCommand(homeDirectory: NSHomeDirectory())
                 let resetScript = ShellCommands.appleScriptDoShellScript(resetCommand, administratorPrivileges: true)
@@ -241,12 +255,17 @@ final class AppViewModel: ObservableObject {
                 self.markStepDone("resetData", succeeded: false)
                 results.append(.init(id: "resetData", name: "Clear Local State", succeeded: false, detail: error.localizedDescription))
                 self.appendLog("Warning: \(error.localizedDescription)")
+                if (error as NSError).code == -1 {
+                    self.resetTimedOut = true
+                    self.lastRunResults = results
+                    throw error
+                }
             }
 
             // 5. DNS flush
             self.workflowState = .flushingDNS
             self.markStepRunning("dns")
-            self.appendLog("Step: Refresh DNS cache (admin prompt may appear)")
+            self.appendLog("Waiting for password to refresh DNS cache…")
             do {
                 let output = try await self.runProcess(
                     stepName: "Refresh DNS cache",
@@ -370,10 +389,42 @@ final class AppViewModel: ObservableObject {
         isRunning = false
     }
 
+    func retryResetZoomData() {
+        resetTimedOut = false
+        lastRunResults = nil
+        workflowProgress = WorkflowProgress(steps: [
+            .init(id: "resetData", name: "Reset Zoom Data", state: .pending)
+        ])
+        runTask("Retry Reset Zoom Data", completionState: .resetCompleted) {
+            self.workflowState = .clearingState
+            self.markStepRunning("resetData")
+            self.appendLog("Waiting for password to reset Zoom data…")
+            do {
+                let resetCommand = ShellCommands.makeResetZoomDataCommand(homeDirectory: NSHomeDirectory())
+                let resetScript = ShellCommands.appleScriptDoShellScript(resetCommand, administratorPrivileges: true)
+                _ = try await self.runProcess(
+                    stepName: "Reset Zoom data",
+                    executable: Constants.osascriptPath,
+                    arguments: ["-e", resetScript]
+                )
+                self.markStepDone("resetData", succeeded: true)
+                self.lastRunResults = [.init(id: "resetData", name: "Clear Local State", succeeded: true, detail: nil)]
+                return "Zoom data reset completed. Run Start Zoom to continue."
+            } catch {
+                self.markStepDone("resetData", succeeded: false)
+                self.lastRunResults = [.init(id: "resetData", name: "Clear Local State", succeeded: false, detail: error.localizedDescription)]
+                if (error as NSError).code == -1 {
+                    self.resetTimedOut = true
+                }
+                throw error
+            }
+        }
+    }
+
     func dryRun() {
         lastRunResults = nil
         workflowProgress = nil
-        runTask("Dry Run") {
+        runTask("Dry Run", completionState: .dryRunCompleted) {
             var results: [String] = []
 
             // Check macOS version
@@ -385,7 +436,7 @@ final class AppViewModel: ObservableObject {
             results.append("Architecture: \(arch == "arm64" ? "Apple Silicon" : (arch == "x86_64" ? "Intel" : arch))")
 
             // Check Zoom
-            let zoomInstalled = FileManager.default.fileExists(atPath: self.zoomBinaryPath)
+            let zoomInstalled = self.isZoomInstalled
             results.append("Zoom binary: \(zoomInstalled ? "Found" : "NOT FOUND") at \(self.zoomBinaryPath)")
             if self.customZoomAppPath != nil {
                 results.append("Zoom location: Custom (\(self.zoomAppPath))")
@@ -456,7 +507,7 @@ final class AppViewModel: ObservableObject {
             checks.append(.init(id: "arch", label: "Architecture", value: archLabel, isWarning: false))
 
             // Zoom installed
-            let zoomInstalled = FileManager.default.fileExists(atPath: zoomBinaryPath)
+            let zoomInstalled = isZoomInstalled
             let zoomValue: String
             if zoomInstalled {
                 zoomValue = customZoomAppPath != nil ? "Installed (custom location)" : "Installed"
@@ -464,6 +515,21 @@ final class AppViewModel: ObservableObject {
                 zoomValue = "Not found"
             }
             checks.append(.init(id: "zoom", label: "Zoom App", value: zoomValue, isWarning: !zoomInstalled))
+
+            let cameraStatus = AVCaptureDevice.authorizationStatus(for: .video)
+            checks.append(.init(
+                id: "camera",
+                label: "Camera",
+                value: mediaPermissionLabel(cameraStatus),
+                isWarning: cameraStatus == .denied || cameraStatus == .restricted
+            ))
+            let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+            checks.append(.init(
+                id: "microphone",
+                label: "Microphone",
+                value: mediaPermissionLabel(microphoneStatus),
+                isWarning: microphoneStatus == .denied || microphoneStatus == .restricted
+            ))
 
             // Active interface & VPN
             do {
@@ -511,6 +577,17 @@ final class AppViewModel: ObservableObject {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(logs.joined(separator: "\n"), forType: .string)
+    }
+
+    func openPrivacySettings(for mediaType: AVMediaType) {
+        let pane = mediaType == .video ? "Privacy_Camera" : "Privacy_Microphone"
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    func openZoomDownload() {
+        guard let url = URL(string: "https://zoom.us/download") else { return }
+        NSWorkspace.shared.open(url)
     }
 
     func logMessage(_ text: String) {
@@ -608,6 +685,7 @@ Last action status: \(lastStatus)
 
     private func runTask(
         _ title: String,
+        completionState: WorkflowState = .completed,
         action: @escaping () async throws -> String
     ) {
         guard !isRunning else {
@@ -615,6 +693,7 @@ Last action status: \(lastStatus)
             return
         }
 
+        resetTimedOut = false
         isRunning = true
         appendLog("=== \(title) ===")
 
@@ -623,6 +702,7 @@ Last action status: \(lastStatus)
                 isRunning = false
                 runningTask = nil
                 currentProcess = nil
+                refreshPreflightMediaChecks()
             }
             do {
                 try Task.checkCancellation()
@@ -630,7 +710,7 @@ Last action status: \(lastStatus)
                 if !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     appendLog(output)
                 }
-                workflowState = .completed
+                workflowState = completionState
                 appendLog("=== Completed ===")
             } catch is CancellationError {
                 workflowState = .canceled
@@ -656,7 +736,9 @@ Last action status: \(lastStatus)
             if line.contains("=== Completed ===") {
                 return "Completed"
             }
-            if line.contains("=== Start Zoom ===") {
+            if line.contains("=== Start Zoom ===")
+                || line.contains("=== Retry Reset Zoom Data ===")
+                || line.contains("=== Dry Run ===") {
                 return "In Progress"
             }
         }
@@ -923,6 +1005,8 @@ If your network connection is disrupted after this step:
     }
 
     private func ensureMediaAccessForSandboxedZoom() async throws -> String {
+        defer { refreshPreflightMediaChecks() }
+
         let cameraStatus = try await ensureMediaAccess(
             mediaType: .video,
             displayName: "Camera",
@@ -935,6 +1019,43 @@ If your network connection is disrupted after this step:
         )
 
         return "\(cameraStatus); \(microphoneStatus)"
+    }
+
+    private func refreshPreflightMediaChecks() {
+        guard !preflight.checks.isEmpty else { return }
+
+        var checks = preflight.checks
+        let cameraStatus = AVCaptureDevice.authorizationStatus(for: .video)
+        if let cameraIndex = checks.firstIndex(where: { $0.id == "camera" }) {
+            checks[cameraIndex] = .init(
+                id: "camera",
+                label: checks[cameraIndex].label,
+                value: mediaPermissionLabel(cameraStatus),
+                isWarning: cameraStatus == .denied || cameraStatus == .restricted
+            )
+        }
+
+        let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        if let microphoneIndex = checks.firstIndex(where: { $0.id == "microphone" }) {
+            checks[microphoneIndex] = .init(
+                id: "microphone",
+                label: checks[microphoneIndex].label,
+                value: mediaPermissionLabel(microphoneStatus),
+                isWarning: microphoneStatus == .denied || microphoneStatus == .restricted
+            )
+        }
+
+        preflight = PreflightInfo(status: preflight.status, checks: checks)
+    }
+
+    private func mediaPermissionLabel(_ status: AVAuthorizationStatus) -> String {
+        switch status {
+        case .authorized: return "Granted"
+        case .notDetermined: return "Not requested"
+        case .denied: return "Denied — open settings"
+        case .restricted: return "Restricted"
+        @unknown default: return "Unknown"
+        }
     }
 
     private func ensureMediaAccess(
@@ -1219,6 +1340,7 @@ private struct AppButtonStyle: ButtonStyle {
 }
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var vm = AppViewModel()
     private let repositoryURL = URL(string: "https://github.com/1132-Fixer/macos")!
     private let websiteURL = URL(string: "https://1132-fixer.xyz")!
@@ -1228,6 +1350,9 @@ struct ContentView: View {
     @State private var latestRelease: ReleaseInfo?
     @State private var isReportingBug = false
     @State private var showBugReportForm = false
+    @State private var showStartConfirmation = false
+    @State private var showActiveReportWarning = false
+    @State private var reportCapturedDuringWorkflow = false
     @State private var bugReportEmail = ""
     @State private var bugReportMessage = ""
 
@@ -1245,35 +1370,53 @@ struct ContentView: View {
             .ignoresSafeArea()
 
             VStack(spacing: Design.s3) {
+                Text("1132 Fixer")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(Design.primaryText)
+
                 HeaderCard(
                     repositoryURL: repositoryURL,
                     websiteURL: websiteURL,
-                    onReportBug: { showBugReportForm = true },
+                    onReportBug: {
+                        if vm.isRunning {
+                            showActiveReportWarning = true
+                        } else {
+                            reportCapturedDuringWorkflow = false
+                            showBugReportForm = true
+                        }
+                    },
                     isReportBugDisabled: isReportingBug,
-                    onExportDiagnostics: { vm.exportDiagnostics(appVersion: appVersion) },
-                    appVersion: appVersion
+                    onExportDiagnostics: { vm.exportDiagnostics(appVersion: appVersion) }
                 )
 
-                PreflightPanel(preflight: vm.preflight)
+                PreflightPanel(
+                    preflight: vm.preflight,
+                    onOpenCameraSettings: { vm.openPrivacySettings(for: .video) },
+                    onOpenMicrophoneSettings: { vm.openPrivacySettings(for: .audio) }
+                )
 
                 ZoomLocationPanel(
                     appPath: vm.zoomAppPath,
                     isCustom: vm.customZoomAppPath != nil,
+                    isInstalled: vm.isZoomInstalled,
                     isDisabled: vm.isRunning,
                     onChoose: { vm.chooseZoomLocation() },
-                    onReset: { vm.resetZoomLocation() }
+                    onReset: { vm.resetZoomLocation() },
+                    onDownload: { vm.openZoomDownload() }
                 )
 
                 HStack(spacing: Design.s2) {
                     ActionCard(
-                        title: "Start Zoom",
-                        subtitle: "Checks the active network, resets Zoom data, refreshes DNS cache, and launches Zoom in sandbox mode.",
+                        title: vm.isZoomInstalled ? "Start Zoom" : "Zoom Required",
+                        subtitle: vm.isZoomInstalled
+                            ? "Checks the network, resets Zoom data, refreshes DNS, and launches Zoom in sandbox mode."
+                            : "Install Zoom or choose its location before starting.",
                         systemImage: "video.circle.fill",
                         tint: Design.accent,
                         isPrimary: true,
-                        isDisabled: vm.isRunning,
+                        isDisabled: vm.isRunning || !vm.isZoomInstalled,
                         action: {
-                            vm.startZoom()
+                            showStartConfirmation = true
                         }
                     )
 
@@ -1310,12 +1453,24 @@ struct ContentView: View {
                     WorkflowProgressBar(progress: progress)
                 }
 
+                WorkflowStatusPanel(
+                    state: vm.workflowState,
+                    resetTimedOut: vm.resetTimedOut,
+                    isRunning: vm.isRunning,
+                    onRetryReset: { vm.retryResetZoomData() }
+                )
+
                 LogPanel(logs: vm.logs, onCopy: vm.copyLogs, onClear: vm.clearLogs)
             }
             .padding(Design.s3)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .frame(minWidth: 720, minHeight: 640)
         .onAppear { vm.runPreflight() }
+        .onChange(of: scenePhase) { newPhase in
+            guard newPhase == .active else { return }
+            vm.runPreflight()
+        }
         .task {
             // Only check for updates in packaged apps that have a real version.
             guard appVersion != "dev" else { return }
@@ -1347,6 +1502,29 @@ struct ContentView: View {
                 Text("A newer version is available.")
             }
         }
+        .confirmationDialog(
+            "Administrator authorization",
+            isPresented: $showStartConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Continue") { vm.startZoom() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("macOS may ask for your password to reset Zoom data and refresh the DNS cache; network repair can require additional administrator prompts on systems where MAC changes are enabled. Your password is handled by macOS and is never stored by 1132 Fixer.")
+        }
+        .confirmationDialog(
+            "Repair still running",
+            isPresented: $showActiveReportWarning,
+            titleVisibility: .visible
+        ) {
+            Button("Wait", role: .cancel) {}
+            Button("Report Current State") {
+                reportCapturedDuringWorkflow = true
+                showBugReportForm = true
+            }
+        } message: {
+            Text("Wait for the repair to finish for more useful diagnostics. A report sent now will be marked as captured during an active workflow.")
+        }
         .sheet(isPresented: $showBugReportForm) {
             BugReportFormSheet(
                 email: $bugReportEmail,
@@ -1372,7 +1550,10 @@ struct ContentView: View {
         let draft = vm.makeBugReportDraft(appVersion: appVersion)
         let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        let reportMessage = trimmedMessage.isEmpty ? "No user message provided." : trimmedMessage
+        let userMessage = trimmedMessage.isEmpty ? "No user message provided." : trimmedMessage
+        let reportMessage = reportCapturedDuringWorkflow
+            ? "Captured during active workflow.\n\n\(userMessage)"
+            : userMessage
 
         do {
             try await BugReportService.sendBugReport(
@@ -1387,6 +1568,7 @@ struct ContentView: View {
             showBugReportForm = false
             bugReportEmail = ""
             bugReportMessage = ""
+            reportCapturedDuringWorkflow = false
         } catch {
             vm.logMessage("Bug report failed: \(error.localizedDescription)")
         }
@@ -1451,49 +1633,25 @@ private struct HeaderCard: View {
     let onReportBug: () -> Void
     let isReportBugDisabled: Bool
     let onExportDiagnostics: () -> Void
-    let appVersion: String
 
     var body: some View {
-        HStack(alignment: .center, spacing: Design.s2) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.white.opacity(0.12))
-                    .frame(width: 64, height: 64)
-                Image(systemName: "video.badge.waveform.fill")
-                    .font(.system(size: 30, weight: .semibold))
-                    .foregroundStyle(Design.primaryText)
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("1132 Fixer")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                    .foregroundStyle(Design.primaryText)
-                Text("Zoom diagnostic & repair")
-                    .font(.system(size: 12, weight: .regular, design: .rounded))
-                    .foregroundStyle(Design.secondaryText)
-            }
-
-            Spacer(minLength: Design.s2)
-
-            HStack(spacing: Design.s1) {
-                HeaderLinkButton(title: "GitHub", systemImage: "link", destination: repositoryURL)
-                HeaderLinkButton(title: "Website", systemImage: "globe", destination: websiteURL)
-                HeaderActionButton(
-                    title: "Report a bug",
-                    systemImage: "ladybug",
-                    isDisabled: isReportBugDisabled,
-                    action: onReportBug
-                )
-                HeaderActionButton(
-                    title: "Export Diagnostics",
-                    systemImage: "square.and.arrow.up",
-                    isDisabled: false,
-                    action: onExportDiagnostics
-                )
-            }
-            .fixedSize()
+        HStack(spacing: Design.s1) {
+            HeaderLinkButton(title: "GitHub", systemImage: "link", destination: repositoryURL)
+            HeaderLinkButton(title: "Website", systemImage: "globe", destination: websiteURL)
+            HeaderActionButton(
+                title: "Report a bug",
+                systemImage: "ladybug",
+                isDisabled: isReportBugDisabled,
+                action: onReportBug
+            )
+            HeaderActionButton(
+                title: "Export Diagnostics",
+                systemImage: "square.and.arrow.up",
+                isDisabled: false,
+                action: onExportDiagnostics
+            )
         }
-        .panelChrome(padding: Design.s2 + 4)
+        .panelChrome(padding: Design.s2)
     }
 }
 
@@ -1505,8 +1663,10 @@ private struct HeaderLinkButton: View {
     var body: some View {
         Link(destination: destination) {
             Label(title, systemImage: systemImage)
+                .frame(maxWidth: .infinity)
                 .secondaryControl()
         }
+        .frame(maxWidth: .infinity)
         .buttonStyle(AppButtonStyle())
     }
 }
@@ -1520,8 +1680,10 @@ private struct HeaderActionButton: View {
     var body: some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
+                .frame(maxWidth: .infinity)
                 .secondaryControl()
         }
+        .frame(maxWidth: .infinity)
         .buttonStyle(AppButtonStyle())
         .disabled(isDisabled)
         .opacity(isDisabled ? 0.5 : 1.0)
@@ -1638,8 +1800,74 @@ private struct WorkflowProgressBar: View {
     }
 }
 
+private struct WorkflowStatusPanel: View {
+    let state: AppViewModel.WorkflowState
+    let resetTimedOut: Bool
+    let isRunning: Bool
+    let onRetryReset: () -> Void
+
+    private var status: (icon: String, title: String, detail: String, tint: Color)? {
+        switch state {
+        case .clearingState:
+            return ("lock.shield", "Waiting for password", "Approve the macOS prompt to reset Zoom data. If you cannot see it, check behind this window.", .yellow)
+        case .flushingDNS:
+            return ("lock.shield", "Waiting for second password", "Approve the macOS prompt to refresh the DNS cache.", .yellow)
+        case .checkingMediaAccess:
+            return ("video.badge.checkmark", "Checking camera and microphone", "Zoom will still launch if access is unavailable, but affected devices will not work.", Design.accent)
+        case .launchingZoom:
+            return ("video.fill", "Launching Zoom securely", "Zoom is starting in required sandbox mode.", Design.accent)
+        case .dryRunCompleted:
+            return ("checkmark.circle.fill", "Dry run completed", "No repair or Zoom launch was performed.", .green)
+        case .completed:
+            return ("checkmark.circle.fill", "Repair completed", "Zoom launch completed. Review any warning steps above.", .green)
+        case .resetCompleted:
+            return ("checkmark.circle.fill", "Zoom data reset", "Reset completed. Run Start Zoom when you are ready to continue.", .green)
+        case .failed(let message):
+            return ("exclamationmark.triangle.fill", resetTimedOut ? "Reset timed out" : "Repair stopped", resetTimedOut ? "The password prompt may be hidden. Check behind this window, then retry only the reset step." : message, .red)
+        case .canceled:
+            return ("xmark.circle.fill", "Repair canceled", "No more workflow steps will run.", .yellow)
+        default:
+            return nil
+        }
+    }
+
+    var body: some View {
+        if let status {
+            HStack(spacing: Design.s2) {
+                Image(systemName: status.icon)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(status.tint)
+                    .frame(width: 24)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(status.title)
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Design.primaryText)
+                    Text(status.detail)
+                        .font(.system(size: 12, weight: .regular, design: .rounded))
+                        .foregroundStyle(Design.secondaryText)
+                }
+
+                Spacer(minLength: Design.s2)
+
+                if resetTimedOut {
+                    Button("Try Reset Again", action: onRetryReset)
+                        .secondaryControl(isProminent: true)
+                        .buttonStyle(AppButtonStyle())
+                        .disabled(isRunning)
+                }
+            }
+            .panelChrome(padding: Design.s2, radius: 16)
+        }
+    }
+}
+
 private struct PreflightPanel: View {
     let preflight: AppViewModel.PreflightInfo
+    let onOpenCameraSettings: () -> Void
+    let onOpenMicrophoneSettings: () -> Void
+
+    @State private var isExpanded = false
 
     private static let supportMatrix: [(label: String, supported: Bool)] = [
         ("Intel", true),
@@ -1653,59 +1881,85 @@ private struct PreflightPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Design.s2) {
-            SectionHeader(title: "Preflight Checks", systemImage: "checklist")
-
-            switch preflight.status {
-            case .loading:
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
+            } label: {
                 HStack(spacing: Design.s1) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Checking system...")
-                        .font(.system(size: 13, weight: .regular, design: .rounded))
-                        .foregroundStyle(Design.secondaryText)
+                    SectionHeader(title: "Preflight Checks", systemImage: "checklist")
+                    Spacer(minLength: Design.s2)
+                    Image(systemName: "chevron.down")
+                        .rotationEffect(.degrees(isExpanded ? 0 : -90))
+                        .frame(width: 14)
+                        .secondaryControl()
                 }
-            case .error(let msg):
-                Text(msg)
-                    .font(.system(size: 12, weight: .regular, design: .monospaced))
-                    .foregroundStyle(.red.opacity(0.9))
-            case .ready:
-                LazyVGrid(
-                    columns: [
-                        GridItem(.flexible(), spacing: Design.s3, alignment: .leading),
-                        GridItem(.flexible(), spacing: Design.s3, alignment: .leading)
-                    ],
-                    alignment: .leading,
-                    spacing: Design.s2
-                ) {
-                    ForEach(preflight.checks) { check in
-                        HStack(alignment: .firstTextBaseline, spacing: Design.s1 + 2) {
-                            Image(systemName: check.isWarning ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                                .font(.system(size: 13))
-                                .foregroundStyle(check.isWarning ? .yellow : .green)
-                                .frame(width: Design.iconColumn, alignment: .center)
-                            Text(check.label + ":")
-                                .font(.system(size: 13, weight: .medium, design: .rounded))
-                                .foregroundStyle(Design.secondaryText)
-                            Text(check.value)
+            }
+            .buttonStyle(AppButtonStyle())
+            .help(isExpanded ? "Collapse preflight checks" : "Expand preflight checks")
+
+            if isExpanded {
+                Group {
+                    switch preflight.status {
+                    case .loading:
+                        HStack(spacing: Design.s1) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Checking system...")
                                 .font(.system(size: 13, weight: .regular, design: .rounded))
-                                .foregroundStyle(Design.primaryText.opacity(0.9))
-                                .fixedSize(horizontal: false, vertical: true)
+                                .foregroundStyle(Design.secondaryText)
+                        }
+                    case .error(let msg):
+                        Text(msg)
+                            .font(.system(size: 12, weight: .regular, design: .monospaced))
+                            .foregroundStyle(.red.opacity(0.9))
+                    case .ready:
+                        LazyVGrid(
+                            columns: [
+                                GridItem(.flexible(), spacing: Design.s3, alignment: .leading),
+                                GridItem(.flexible(), spacing: Design.s3, alignment: .leading)
+                            ],
+                            alignment: .leading,
+                            spacing: Design.s2
+                        ) {
+                            ForEach(preflight.checks) { check in
+                                HStack(alignment: .firstTextBaseline, spacing: Design.s1 + 2) {
+                                    Image(systemName: check.isWarning ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(check.isWarning ? .yellow : .green)
+                                        .frame(width: Design.iconColumn, alignment: .center)
+                                    Text(check.label + ":")
+                                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                                        .foregroundStyle(Design.secondaryText)
+                                    Text(check.value)
+                                        .font(.system(size: 13, weight: .regular, design: .rounded))
+                                        .foregroundStyle(Design.primaryText.opacity(0.9))
+                                        .fixedSize(horizontal: false, vertical: true)
+
+                                    if check.id == "camera" && check.isWarning {
+                                        Button("Open Settings", action: onOpenCameraSettings)
+                                            .buttonStyle(.link)
+                                    } else if check.id == "microphone" && check.isWarning {
+                                        Button("Open Settings", action: onOpenMicrophoneSettings)
+                                            .buttonStyle(.link)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Divider()
+                        .overlay(Color.white.opacity(0.08))
+                        .padding(.vertical, Design.s1)
+
+                    HStack(spacing: Design.s1) {
+                        Text("Supported:")
+                            .font(.system(size: 11, weight: .regular, design: .rounded))
+                            .foregroundStyle(Design.tertiaryText)
+                        ForEach(Self.supportMatrix, id: \.label) { item in
+                            SupportBadge(label: item.label, supported: item.supported)
                         }
                     }
                 }
-            }
-
-            Divider()
-                .overlay(Color.white.opacity(0.08))
-                .padding(.vertical, Design.s1)
-
-            HStack(spacing: Design.s1) {
-                Text("Supported:")
-                    .font(.system(size: 11, weight: .regular, design: .rounded))
-                    .foregroundStyle(Design.tertiaryText)
-                ForEach(Self.supportMatrix, id: \.label) { item in
-                    SupportBadge(label: item.label, supported: item.supported)
-                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .panelChrome()
@@ -1733,9 +1987,11 @@ private struct SupportBadge: View {
 private struct ZoomLocationPanel: View {
     let appPath: String
     let isCustom: Bool
+    let isInstalled: Bool
     let isDisabled: Bool
     let onChoose: () -> Void
     let onReset: () -> Void
+    let onDownload: () -> Void
 
     var body: some View {
         HStack(alignment: .center, spacing: Design.s3) {
@@ -1761,11 +2017,26 @@ private struct ZoomLocationPanel: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .textSelection(.enabled)
+
+                if !isInstalled {
+                    Text("Zoom was not found at this location.")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(.yellow)
+                }
             }
 
             Spacer(minLength: Design.s2)
 
             HStack(spacing: Design.s1) {
+                if !isInstalled {
+                    Button(action: onDownload) {
+                        Label("Download Zoom", systemImage: "arrow.down.circle")
+                            .secondaryControl()
+                    }
+                    .buttonStyle(AppButtonStyle())
+                    .disabled(isDisabled)
+                }
+
                 if isCustom {
                     Button(action: onReset) {
                         Text("Use Default")
@@ -1795,7 +2066,7 @@ private struct LogPanel: View {
     let onCopy: () -> Void
     let onClear: () -> Void
 
-    @State private var isExpanded = true
+    @State private var isExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Design.s2) {

@@ -17,11 +17,9 @@ struct Fixer1132App: App {
     }
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup("1132 Fixer") {
             ContentView()
         }
         .windowResizability(.contentMinSize)
-        .windowToolbarStyle(.unified(showsTitle: false))
-        .windowStyle(.hiddenTitleBar)
     }
 }
