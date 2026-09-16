@@ -1370,6 +1370,10 @@ struct ContentView: View {
             .ignoresSafeArea()
 
             VStack(spacing: Design.s3) {
+                Text("1132 Fixer")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(Design.primaryText)
+
                 HeaderCard(
                     repositoryURL: repositoryURL,
                     websiteURL: websiteURL,
@@ -1459,6 +1463,7 @@ struct ContentView: View {
                 LogPanel(logs: vm.logs, onCopy: vm.copyLogs, onClear: vm.clearLogs)
             }
             .padding(Design.s3)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .frame(minWidth: 720, minHeight: 640)
         .onAppear { vm.runPreflight() }
