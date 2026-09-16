@@ -1457,14 +1457,14 @@ struct ContentView: View {
             }
         }
         .confirmationDialog(
-            "Two administrator prompts",
+            "Administrator authorization",
             isPresented: $showStartConfirmation,
             titleVisibility: .visible
         ) {
             Button("Continue") { vm.startZoom() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("macOS will ask for your password twice: once to reset Zoom data and once to refresh the DNS cache. Your password is handled by macOS and is never stored by 1132 Fixer.")
+            Text("macOS may ask for your password to reset Zoom data and refresh the DNS cache; network repair can require additional administrator prompts on systems where MAC changes are enabled. Your password is handled by macOS and is never stored by 1132 Fixer.")
         }
         .confirmationDialog(
             "Repair still running",
