@@ -65,7 +65,7 @@ enum ShellCommands {
     // MARK: - Shell Quoting
 
     static func shellSingleQuote(_ value: String) -> String {
-        "'" + value.replacingOccurrences(of: "'", with: #"'\"'\"'"#) + "'"
+        "'" + value.replacingOccurrences(of: "'", with: #"'"'"'"#) + "'"
     }
 
     static func appleScriptDoShellScript(_ command: String, administratorPrivileges: Bool) -> String {
