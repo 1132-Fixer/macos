@@ -4,3 +4,13 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      production-dependencies:
+        patterns: ["*"]
+  - package-ecosystem: "swift"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      production-dependencies:
+        patterns: ["*"]

@@ -20,6 +20,8 @@ On launch, the app checks the GitHub Releases `latest` endpoint and prompts if a
 ## License and Risk
 
 This project is licensed under the terms in `LICENSE`.
+Commercial use is prohibited without prior written permission from the
+copyright holders.
 
 Attribution is required: any copy, fork, or derivative of this project must
 give clear and prominent credit to the original project, **1132 Fixer**, with
