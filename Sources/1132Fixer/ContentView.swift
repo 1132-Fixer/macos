@@ -75,7 +75,6 @@ final class AppViewModel: ObservableObject {
         case checkingNetwork
         case backingUpState
         case clearingState
-        case flushingDNS
         case stoppingUpdaters
         case checkingMediaAccess
         case launchingZoom
@@ -135,7 +134,6 @@ final class AppViewModel: ObservableObject {
     private var currentProcess: Process?
     private let stopZoomCommand = ShellCommands.stopZoom
     private let stopZoomUpdatersCommand = ShellCommands.stopZoomUpdaters
-    private let refreshDNSAppleScript = ShellCommands.refreshDNSAppleScript
 
     /// The `zoom.us.app` bundle path currently in effect. `nil` means the default
     /// `/Applications` location; a non-nil value is a user-selected location.
@@ -237,47 +235,41 @@ final class AppViewModel: ObservableObject {
                 self.appendLog("Warning: Backup failed, continuing anyway: \(error.localizedDescription)")
             }
 
-            // 4. Reset Zoom data
+            // 4–5. Reset Zoom data and refresh DNS with one authorization
             self.workflowState = .clearingState
             self.markStepRunning("resetData")
-            self.appendLog("Waiting for password to reset Zoom data…")
+            self.markStepRunning("dns")
+            self.appendLog("Waiting for password to reset Zoom data and refresh DNS cache…")
             do {
-                let resetCommand = ShellCommands.makeResetZoomDataCommand(homeDirectory: NSHomeDirectory())
-                let resetScript = ShellCommands.appleScriptDoShellScript(resetCommand, administratorPrivileges: true)
+                let command = ShellCommands.makeResetAndRefreshDNSCommand(homeDirectory: NSHomeDirectory())
+                let script = ShellCommands.appleScriptDoShellScript(command, administratorPrivileges: true)
                 let output = try await self.runProcess(
-                    stepName: "Reset Zoom data",
+                    stepName: "Reset Zoom data and refresh DNS cache",
                     executable: Constants.osascriptPath,
-                    arguments: ["-e", resetScript]
+                    arguments: ["-e", script]
                 )
-                self.markStepDone("resetData", succeeded: true)
-                results.append(.init(id: "resetData", name: "Clear Local State", succeeded: true, detail: output.isEmpty ? nil : output))
+                let lines = output.components(separatedBy: .newlines)
+                let resetSucceeded = lines.contains("__1132_RESET_STATUS__=0")
+                let dnsSucceeded = lines.contains("__1132_DNS_STATUS__=0")
+                let detail = lines.filter { !$0.hasPrefix("__1132_") }.joined(separator: "\n")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                self.markStepDone("resetData", succeeded: resetSucceeded)
+                self.markStepDone("dns", succeeded: dnsSucceeded)
+                results.append(.init(id: "resetData", name: "Clear Local State", succeeded: resetSucceeded,
+                                     detail: resetSucceeded ? (detail.isEmpty ? nil : detail) : "Could not clear all Zoom data. \(detail)"))
+                results.append(.init(id: "dns", name: "DNS Flush", succeeded: dnsSucceeded,
+                                     detail: dnsSucceeded ? nil : "Could not refresh DNS cache. \(detail)"))
             } catch {
                 self.markStepDone("resetData", succeeded: false)
                 results.append(.init(id: "resetData", name: "Clear Local State", succeeded: false, detail: error.localizedDescription))
+                self.markStepDone("dns", succeeded: false)
+                results.append(.init(id: "dns", name: "DNS Flush", succeeded: false, detail: error.localizedDescription))
                 self.appendLog("Warning: \(error.localizedDescription)")
                 if (error as NSError).code == -1 {
                     self.resetTimedOut = true
                     self.lastRunResults = results
                     throw error
                 }
-            }
-
-            // 5. DNS flush
-            self.workflowState = .flushingDNS
-            self.markStepRunning("dns")
-            self.appendLog("Waiting for password to refresh DNS cache…")
-            do {
-                let output = try await self.runProcess(
-                    stepName: "Refresh DNS cache",
-                    executable: Constants.osascriptPath,
-                    arguments: ["-e", self.refreshDNSAppleScript]
-                )
-                self.markStepDone("dns", succeeded: true)
-                results.append(.init(id: "dns", name: "DNS Flush", succeeded: true, detail: output.isEmpty ? nil : output))
-            } catch {
-                self.markStepDone("dns", succeeded: false)
-                results.append(.init(id: "dns", name: "DNS Flush", succeeded: false, detail: error.localizedDescription))
-                self.appendLog("Warning: \(error.localizedDescription)")
             }
 
             // 6. Stop updaters
@@ -1510,7 +1502,7 @@ struct ContentView: View {
             Button("Continue") { vm.startZoom() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("macOS may ask for your password to reset Zoom data and refresh the DNS cache; network repair can require additional administrator prompts on systems where MAC changes are enabled. Your password is handled by macOS and is never stored by 1132 Fixer.")
+            Text("macOS may ask once for your password to reset Zoom data and refresh the DNS cache; network repair can require additional administrator prompts on systems where MAC changes are enabled. Your password is handled by macOS and is never stored by 1132 Fixer.")
         }
         .confirmationDialog(
             "Repair still running",
@@ -1809,9 +1801,7 @@ private struct WorkflowStatusPanel: View {
     private var status: (icon: String, title: String, detail: String, tint: Color)? {
         switch state {
         case .clearingState:
-            return ("lock.shield", "Waiting for password", "Approve the macOS prompt to reset Zoom data. If you cannot see it, check behind this window.", .yellow)
-        case .flushingDNS:
-            return ("lock.shield", "Waiting for second password", "Approve the macOS prompt to refresh the DNS cache.", .yellow)
+            return ("lock.shield", "Waiting for password", "Approve the macOS prompt to reset Zoom data and refresh the DNS cache. If you cannot see it, check behind this window.", .yellow)
         case .checkingMediaAccess:
             return ("video.badge.checkmark", "Checking camera and microphone", "Zoom will still launch if access is unavailable, but affected devices will not work.", Design.accent)
         case .launchingZoom:

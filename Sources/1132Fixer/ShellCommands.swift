@@ -114,7 +114,18 @@ enum ShellCommands {
     done
     """#
 
-    static let refreshDNSAppleScript = #"do shell script "/usr/bin/dscacheutil -flushcache; /usr/bin/killall -HUP mDNSResponder" with administrator privileges"#
+    static func makeResetAndRefreshDNSCommand(homeDirectory: String) -> String {
+        """
+        (
+        \(makeResetZoomDataCommand(homeDirectory: homeDirectory))
+        )
+        reset_status=$?
+        /usr/bin/dscacheutil -flushcache
+        dns_status=$?
+        /usr/bin/killall -HUP mDNSResponder || dns_status=$?
+        printf '\n__1132_RESET_STATUS__=%s\n__1132_DNS_STATUS__=%s\n' "$reset_status" "$dns_status"
+        """
+    }
 
     static func makeResetZoomDataCommand(homeDirectory: String) -> String {
         let home = shellSingleQuote(homeDirectory)
