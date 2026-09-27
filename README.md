@@ -1,5 +1,7 @@
 # 1132 Fixer
 
+<img width="2086" height="216" alt="image" src="https://github.com/user-attachments/assets/7da05d6d-ebbc-4384-ae35-52d2a1e1e6b9" />
+
 ## [Download the latest release here](https://github.com/1132-Fixer/macos/releases/latest)
 
 ## [Discuss on Telegram](https://t.me/Team1132Fixer)
