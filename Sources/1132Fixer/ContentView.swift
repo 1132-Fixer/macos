@@ -1335,7 +1335,7 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var vm = AppViewModel()
     private let repositoryURL = URL(string: "https://github.com/1132-Fixer/macos")!
-    private let websiteURL = URL(string: "https://1132-fixer.xyz")!
+    private let websiteURL = URL(string: "https://botify-network.com/apps/1132-fixer")!
     private let appVersion = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "dev"
 
     @State private var updateAlertIsPresented = false
