@@ -1,0 +1,11 @@
+# Manual commands for macOS 13+ with Swift 5.9+ installed.
+# No triggers: run these explicitly from the Copilot app.
+scripts:
+  - name: Setup
+    command: swift package resolve
+  - name: Build
+    command: swift build
+  - name: Test
+    command: swift test
+  - name: Run
+    command: swift run
