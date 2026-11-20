@@ -1,6 +1,6 @@
-/design-system @patricktobias86 @high-texas
-/.brand-assets.tsv @patricktobias86 @high-texas
-/Sources/1132Fixer/Resources/ @patricktobias86 @high-texas
-/Sources/1132Fixer/*.swift @patricktobias86 @high-texas
-/.github/CODEOWNERS @patricktobias86 @high-texas
-/.github/workflows/brand.yml @patricktobias86 @high-texas
+/design-system @patricktobias86 @hightexas
+/.brand-assets.tsv @patricktobias86 @hightexas
+/Sources/1132Fixer/Resources/ @patricktobias86 @hightexas
+/Sources/1132Fixer/*.swift @patricktobias86 @hightexas
+/.github/CODEOWNERS @patricktobias86 @hightexas
+/.github/workflows/brand.yml @patricktobias86 @hightexas
